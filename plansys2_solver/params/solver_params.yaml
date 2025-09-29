@@ -15,6 +15,7 @@ solver:
   ros__parameters:
     solver_timeout: 120.0  
     solver_plugins: ["LLAMA"]
+    LLAMA.llm_feedback: true
     LLAMA:
       plugin: "plansys2/LLAMASolver"
 executor:

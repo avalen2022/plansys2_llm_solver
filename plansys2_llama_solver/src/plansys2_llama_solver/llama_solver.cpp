@@ -35,6 +35,7 @@ void LLAMASolver::configure(
 
   arguments_parameter_name_ = plugin_name + ".arguments";
   output_dir_parameter_name_ = plugin_name + ".output_dir";
+  llm_feedback_parameter_ = plugin_name + ".llm_feedback";
 
   if (!lc_node_->has_parameter(arguments_parameter_name_)) {
     lc_node_->declare_parameter<std::string>(arguments_parameter_name_, "");
@@ -42,6 +43,9 @@ void LLAMASolver::configure(
   if (!lc_node_->has_parameter(output_dir_parameter_name_)) {
     lc_node_->declare_parameter<std::string>(
       output_dir_parameter_name_, std::filesystem::temp_directory_path());
+  }
+  if (!lc_node_->has_parameter(llm_feedback_parameter_)) {
+    lc_node_->declare_parameter<bool>(llm_feedback_parameter_, false);
   }
 }
 
@@ -106,9 +110,11 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   problem_out.close();
 
   const auto resolution_file_path = output_dir / std::filesystem::path("solver_resolution.txt");
-
   const auto solver_file_path = output_dir / std::filesystem::path("solver");
+
   const auto args = lc_node_->get_parameter(arguments_parameter_name_).value_to_string();
+  bool flag = lc_node_->get_parameter(llm_feedback_parameter_).as_bool();
+
 
   RCLCPP_DEBUG(
     lc_node_->get_logger(),
@@ -119,7 +125,7 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
 
   if (pid == 0) {
     int fd = open("/dev/null", O_WRONLY);
-    if (fd != -1) {
+    if (fd != -1 && flag == false) {
       dup2(fd, STDOUT_FILENO);
       dup2(fd, STDERR_FILENO);
       close(fd);
@@ -133,8 +139,6 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
 
   std::this_thread::sleep_for(std::chrono::seconds(10));
 
-  RCLCPP_INFO(lc_node_->get_logger(), "[%s] Action_hub\n %s",lc_node_->get_name(), action_file.c_str());
-
   std::string prompt_text =
     "\"-- Contents ---\n"
     "Domain:\n" + domain + "\n\n"
@@ -142,7 +146,7 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     "Action_hub:\n" + action_file + "\n\n"
     "Question: I want you to analyze the action_hub and tell me what to fix in the domain and problem in order to solve the failure of the action that is failing\"";
 
-  std::string prompt_cmd = "ros2 llama prompt" + prompt_cmd + " -t 0.0 > " + resolution_file_path.c_str();
+  std::string prompt_cmd = "ros2 llama prompt " + prompt_text + " -t 0.0 > " + resolution_file_path.c_str();
   int ret = std::system(prompt_cmd.c_str());
 
   kill(pid, SIGINT);
