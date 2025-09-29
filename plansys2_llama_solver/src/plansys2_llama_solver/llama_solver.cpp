@@ -133,7 +133,16 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
 
   std::this_thread::sleep_for(std::chrono::seconds(10));
 
-  std::string prompt_cmd = "ros2 llama prompt \"Como ves mi problema: " + problem + "\" -t 0.0 > " + resolution_file_path.c_str();
+  RCLCPP_INFO(lc_node_->get_logger(), "[%s] Action_hub\n %s",lc_node_->get_name(), action_file.c_str());
+
+  std::string prompt_text =
+    "\"-- Contents ---\n"
+    "Domain:\n" + domain + "\n\n"
+    "Problem:\n" + problem + "\n\n"
+    "Action_hub:\n" + action_file + "\n\n"
+    "Question: I want you to analyze the action_hub and tell me what to fix in the domain and problem in order to solve the failure of the action that is failing\"";
+
+  std::string prompt_cmd = "ros2 llama prompt" + prompt_cmd + " -t 0.0 > " + resolution_file_path.c_str();
   int ret = std::system(prompt_cmd.c_str());
 
   kill(pid, SIGINT);
