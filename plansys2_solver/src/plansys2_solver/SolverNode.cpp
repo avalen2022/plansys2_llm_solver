@@ -16,7 +16,7 @@ SolverNode::SolverNode()
   lp_loader_("plansys2_solver", "plansys2::SolverBase"),
   default_ids_{},
   default_types_{},
-  resolution_timeout_(15s)
+  resolution_timeout_(120s)
 {
   declare_parameter("solver_plugins", default_ids_);
   double timeout = resolution_timeout_.seconds();
@@ -151,7 +151,6 @@ SolverNode::get_solve_service_callback(
   if (!solves.solver_array.empty()) {
     response->status = plansys2_msgs::srv::GetSolve::Response::SUCCESS;
     response->solver = solves.solver_array.front();
-    RCLCPP_INFO(this->get_logger(), "[%s]", response->solver.resolution.c_str());
   } else {
     response->status = plansys2_msgs::srv::GetSolve::Response::ERROR;
     response->error_info = "Resolution not found";
@@ -167,7 +166,7 @@ SolverNode::get_solve_array(const std::string & domain, const std::string & prob
   for (auto & resol : resolutors_) {
     futures[resol.first] = std::async(std::launch::async,
       &plansys2::SolverBase::solve, resol.second,
-      domain, problem, action_file, resolution_timeout_);
+      domain, problem, action_file, get_namespace(), resolution_timeout_);
   }
 
   auto start = now();
