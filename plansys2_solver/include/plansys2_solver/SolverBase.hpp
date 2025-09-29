@@ -27,7 +27,9 @@ public:
 
   virtual std::optional<plansys2_msgs::msg::Solver> solve(
     const std::string & domain, const std::string & problem, 
-    const std::string & action_file, const rclcpp::Duration resolution_timeout = 15s) = 0;
+    const std::string & action_file,
+    const std::string & node_namespace = "",
+    const rclcpp::Duration resolution_timeout = 120s) = 0;
 
   virtual void cancel() {cancel_requested_ = true;}
 
