@@ -53,6 +53,9 @@ public:
    * @param[in] lc_node Pointer to the lifecycle node.
    * @param[in] plugin_name Name of the plugin to use for parameter namespacing.
    */
+
+  std::optional<std::filesystem::path> create_folders(const std::string & node_namespace);
+
   void configure(
     rclcpp_lifecycle::LifecycleNode::SharedPtr lc_node,
     const std::string & plugin_name) override;
@@ -61,7 +64,8 @@ public:
 
   virtual std::optional<plansys2_msgs::msg::Solver> solve(
     const std::string & domain, const std::string & problem, 
-    const std::string & action_file, 
+    const std::string & action_file,
+    const std::string & node_namespace = "",
     const rclcpp::Duration resolution_timeout = 15s) override;
 
 private:
