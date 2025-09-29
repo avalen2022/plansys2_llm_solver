@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <string>
 #include <vector>
+#include <fstream>
 
 #include "plansys2_solver/SolverBase.hpp"
 
@@ -153,6 +154,17 @@ std::string get_plugin_type_param(
     exit(-1);
   }
   return plugin_type;
+}
+
+std::string read_file(const std::string & file_path)
+{
+  std::ifstream file(file_path);
+  if (!file) {
+    return "";
+  }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
 }
 
 }

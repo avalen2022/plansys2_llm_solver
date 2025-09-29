@@ -59,6 +59,7 @@ SolverNode::on_configure(const rclcpp_lifecycle::State & state)
     std::filesystem::create_directories("/tmp" + nm);
     action_file_path_ = "/tmp" + nm + "/solver_action_hub.txt";
   } else {
+    nm = "";
     action_file_path_ = "/tmp/solver_action_hub.txt";
   }
 
@@ -211,7 +212,8 @@ SolverNode::get_solve_service_callback(
   const std::shared_ptr<plansys2_msgs::srv::GetSolve::Response> response)
 {
   (void) request_header;
-  auto solves = get_solve_array(request->domain, request->problem, "action_file.txt");
+  std::string action_file = read_file(action_file_path_);
+  auto solves = get_solve_array(request->domain, request->problem, action_file);
 
   if (!solves.solver_array.empty()) {
     response->status = plansys2_msgs::srv::GetSolve::Response::SUCCESS;
