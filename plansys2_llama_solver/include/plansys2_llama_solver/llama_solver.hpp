@@ -71,7 +71,7 @@ public:
 private:
   std::string arguments_parameter_name_;
   std::string output_dir_parameter_name_;
-  std::string llm_feedback_parameter_;
+  std::string llm_debug_parameter_;
   bool cancel_requested_;
 
 };

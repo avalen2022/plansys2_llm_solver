@@ -35,7 +35,7 @@ void LLAMASolver::configure(
 
   arguments_parameter_name_ = plugin_name + ".arguments";
   output_dir_parameter_name_ = plugin_name + ".output_dir";
-  llm_feedback_parameter_ = plugin_name + ".llm_feedback";
+  llm_debug_parameter_ = plugin_name + ".llm_debug";
 
   if (!lc_node_->has_parameter(arguments_parameter_name_)) {
     lc_node_->declare_parameter<std::string>(arguments_parameter_name_, "");
@@ -44,8 +44,8 @@ void LLAMASolver::configure(
     lc_node_->declare_parameter<std::string>(
       output_dir_parameter_name_, std::filesystem::temp_directory_path());
   }
-  if (!lc_node_->has_parameter(llm_feedback_parameter_)) {
-    lc_node_->declare_parameter<bool>(llm_feedback_parameter_, false);
+  if (!lc_node_->has_parameter(llm_debug_parameter_)) {
+    lc_node_->declare_parameter<bool>(llm_debug_parameter_, false);
   }
 }
 
@@ -113,7 +113,7 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   const auto solver_file_path = output_dir / std::filesystem::path("solver");
 
   const auto args = lc_node_->get_parameter(arguments_parameter_name_).value_to_string();
-  bool flag = lc_node_->get_parameter(llm_feedback_parameter_).as_bool();
+  bool flag = lc_node_->get_parameter(llm_debug_parameter_).as_bool();
 
 
   RCLCPP_DEBUG(
