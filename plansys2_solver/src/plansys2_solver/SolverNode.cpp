@@ -54,6 +54,22 @@ SolverNode::on_configure(const rclcpp_lifecycle::State & state)
   get_parameter("solver_plugins", workers_ids_);
   get_parameter("solver_timeout", timeout);
 
+  std::string nm = get_namespace();
+  if (nm != "/") {
+    std::filesystem::create_directories("/tmp" + nm);
+    action_file_path_ = "/tmp" + nm + "/solver_action_hub.txt";
+  } else {
+    action_file_path_ = "/tmp/solver_action_hub.txt";
+  }
+
+  std::ofstream action_file_(action_file_path_, std::ios::out);
+  if (!action_file_) {
+    RCLCPP_ERROR(this->get_logger(), "[%s] Error can't open the .txt", get_name());
+    return CallbackReturnT::FAILURE;
+  }
+  action_file_.close();
+
+
   resolution_timeout_ = rclcpp::Duration((int32_t)timeout, 0);
 
   if (!workers_ids_.empty()) {
@@ -97,9 +113,8 @@ SolverNode::on_configure(const rclcpp_lifecycle::State & state)
       this, std::placeholders::_1, std::placeholders::_2,
       std::placeholders::_3));
 
-  std::string nm = get_namespace();
   action_subs_ = this->create_subscription<plansys2_msgs::msg::ActionExecution>(
-    nm + "actions_hub", rclcpp::SensorDataQoS().reliable(),
+    nm + "/actions_hub", rclcpp::SensorDataQoS().reliable(),
     std::bind(&SolverNode::action_hub_callback, this, _1));
 
   return CallbackReturnT::SUCCESS;
@@ -155,11 +170,17 @@ SolverNode::on_error(const rclcpp_lifecycle::State & state)
 
 void SolverNode::action_hub_callback(plansys2_msgs::msg::ActionExecution::UniquePtr msg)
 {
-  if (msg == msg_ || (msg_ != nullptr && msg_->completion + 0.30f >= msg->completion)) {
+  if (msg == msg_) {
     return;
   }
 
-  std::ofstream action_file_("/tmp/solver_action_hub.txt", std::ios::app);
+  if (msg->success == false && msg->completion != 0) {
+    if (msg_ != nullptr && (msg_->completion + 0.30f >= msg->completion)) {
+      return;
+    }
+  }
+
+  std::ofstream action_file_(action_file_path_, std::ios::app);
   if (action_file_.is_open()) {
     action_file_ << "-----------------------------\n";
     action_file_ << "Node ID: " << msg->node_id << "\n";

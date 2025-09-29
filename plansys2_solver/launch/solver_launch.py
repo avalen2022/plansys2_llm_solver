@@ -31,7 +31,7 @@ def generate_launch_description():
         description='Namespace')
 
     # Specify the actions
-    planner_cmd = Node(
+    solver_cmd = Node(
         package='plansys2_solver',
         executable='solver_node',
         name='solver',
@@ -45,6 +45,6 @@ def generate_launch_description():
     ld.add_action(declare_namespace_cmd)
 
     # Declare the launch options
-    ld.add_action(planner_cmd)
+    ld.add_action(solver_cmd)
 
     return ld

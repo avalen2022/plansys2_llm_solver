@@ -117,6 +117,7 @@ private:
   rclcpp::Subscription<plansys2_msgs::msg::ActionExecution>::SharedPtr action_subs_;
 
   plansys2_msgs::msg::ActionExecution::UniquePtr msg_;
+  std::string action_file_path_;
 };
 
 template<typename NodeT>
