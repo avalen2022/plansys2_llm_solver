@@ -10,6 +10,7 @@
 
 #include "lifecycle_msgs/msg/state.hpp"
 #include "lifecycle_msgs/msg/transition.hpp"
+#include "plansys2_msgs/msg/action_execution.hpp"
 #include "plansys2_msgs/msg/solver_array.hpp"
 #include "plansys2_msgs/srv/get_solve.hpp"
 
@@ -100,6 +101,8 @@ public:
   plansys2_msgs::msg::SolverArray get_solve_array(
     const std::string & domain, const std::string & problem, std::string action_file);
 
+  void action_hub_callback(plansys2_msgs::msg::ActionExecution::UniquePtr msg);
+
 private:
   pluginlib::ClassLoader<plansys2::SolverBase> lp_loader_;
   std::vector<std::string> default_ids_;
@@ -111,6 +114,9 @@ private:
   SolverMap resolutors_;
 
   rclcpp::Service<plansys2_msgs::srv::GetSolve>::SharedPtr get_solve_service_;
+  rclcpp::Subscription<plansys2_msgs::msg::ActionExecution>::SharedPtr action_subs_;
+
+  plansys2_msgs::msg::ActionExecution::UniquePtr msg_;
 };
 
 template<typename NodeT>

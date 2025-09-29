@@ -7,6 +7,7 @@
 #include "lifecycle_msgs/msg/state.hpp"
 
 using namespace std::chrono_literals;
+using std::placeholders::_1;
 
 namespace plansys2
 {
@@ -44,6 +45,7 @@ using CallbackReturnT =
 CallbackReturnT
 SolverNode::on_configure(const rclcpp_lifecycle::State & state)
 {
+  (void) state;
   auto node = shared_from_this();
   double timeout;
 
@@ -94,12 +96,19 @@ SolverNode::on_configure(const rclcpp_lifecycle::State & state)
       &SolverNode::get_solve_service_callback,
       this, std::placeholders::_1, std::placeholders::_2,
       std::placeholders::_3));
+
+  std::string nm = get_namespace();
+  action_subs_ = this->create_subscription<plansys2_msgs::msg::ActionExecution>(
+    nm + "actions_hub", rclcpp::SensorDataQoS().reliable(),
+    std::bind(&SolverNode::action_hub_callback, this, _1));
+
   return CallbackReturnT::SUCCESS;
 }
 
 CallbackReturnT
 SolverNode::on_activate(const rclcpp_lifecycle::State & state)
 {
+  (void) state;
   RCLCPP_INFO(this->get_logger(), "[%s] Activating...", get_name());
   RCLCPP_INFO(this->get_logger(), "[%s] Activated", get_name());
   return CallbackReturnT::SUCCESS;
@@ -108,6 +117,7 @@ SolverNode::on_activate(const rclcpp_lifecycle::State & state)
 CallbackReturnT
 SolverNode::on_deactivate(const rclcpp_lifecycle::State & state)
 {
+  (void) state;
   RCLCPP_INFO(this->get_logger(), "[%s] Deactivating...", get_name());
   RCLCPP_INFO(this->get_logger(), "[%s] Deactivated", get_name());
 
@@ -117,6 +127,7 @@ SolverNode::on_deactivate(const rclcpp_lifecycle::State & state)
 CallbackReturnT
 SolverNode::on_cleanup(const rclcpp_lifecycle::State & state)
 {
+  (void) state;
   RCLCPP_INFO(this->get_logger(), "[%s] Cleaning up...", get_name());
   RCLCPP_INFO(this->get_logger(), "[%s] Cleaned up", get_name());
 
@@ -126,6 +137,7 @@ SolverNode::on_cleanup(const rclcpp_lifecycle::State & state)
 CallbackReturnT
 SolverNode::on_shutdown(const rclcpp_lifecycle::State & state)
 {
+  (void) state;
   RCLCPP_INFO(this->get_logger(), "[%s] Shutting down...", get_name());
   RCLCPP_INFO(this->get_logger(), "[%s] Shutted down", get_name());
 
@@ -135,9 +147,40 @@ SolverNode::on_shutdown(const rclcpp_lifecycle::State & state)
 CallbackReturnT
 SolverNode::on_error(const rclcpp_lifecycle::State & state)
 {
+  (void) state;
   RCLCPP_ERROR(this->get_logger(), "[%s] Error transition", get_name());
 
   return CallbackReturnT::SUCCESS;
+}
+
+void SolverNode::action_hub_callback(plansys2_msgs::msg::ActionExecution::UniquePtr msg)
+{
+  if (msg == msg_ || (msg_ != nullptr && msg_->completion + 0.30f >= msg->completion)) {
+    return;
+  }
+
+  std::ofstream action_file_("/tmp/solver_action_hub.txt", std::ios::app);
+  if (action_file_.is_open()) {
+    action_file_ << "-----------------------------\n";
+    action_file_ << "Node ID: " << msg->node_id << "\n";
+    action_file_ << "Type: " << msg->type << "\n";
+
+    action_file_ << "Action: " << msg->action << "\n";
+    action_file_ << "Arguments:\n";
+    for (const auto &arg : msg->arguments) {
+      action_file_ << "  - " << arg << "\n";
+    }
+
+    action_file_ << "Success: " << (msg->success ? "true" : "false") << "\n";
+    action_file_ << "Completion: " << msg->completion << "\n";
+    action_file_ << "Status: " << msg->status << "\n";
+
+    action_file_ << "-----------------------------\n\n";
+  } else {
+    RCLCPP_WARN(this->get_logger(), "No se pudo abrir el archivo de log");
+  }
+
+  msg_ = std::move(msg);
 }
 
 void
@@ -146,6 +189,7 @@ SolverNode::get_solve_service_callback(
   const std::shared_ptr<plansys2_msgs::srv::GetSolve::Request> request,
   const std::shared_ptr<plansys2_msgs::srv::GetSolve::Response> response)
 {
+  (void) request_header;
   auto solves = get_solve_array(request->domain, request->problem, "action_file.txt");
 
   if (!solves.solver_array.empty()) {
