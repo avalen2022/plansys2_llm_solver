@@ -63,7 +63,8 @@ public:
   void initialize(const std::string & node_name) override;
 
   virtual std::optional<plansys2_msgs::msg::Solver> solve(
-    const std::string & domain, const std::string & problem, 
+    const std::string & domain, const std::string & problem,
+    const std::string & question,
     const std::string & action_file,
     const std::string & node_namespace = "",
     const rclcpp::Duration resolution_timeout = 15s) override;

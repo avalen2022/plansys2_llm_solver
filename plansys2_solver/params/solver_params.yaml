@@ -13,7 +13,7 @@ planner:
       plugin: "plansys2/TAMERPlanSolver"
 solver:
   ros__parameters:
-    solver_timeout: 120.0  
+    solver_timeout: 240.0
     solver_plugins: ["LLAMA"]
     LLAMA.llm_debug: true
     LLAMA:

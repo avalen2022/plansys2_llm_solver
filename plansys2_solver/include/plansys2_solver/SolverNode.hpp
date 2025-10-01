@@ -100,7 +100,7 @@ public:
     const std::shared_ptr<plansys2_msgs::srv::GetSolve::Response> response);
 
   plansys2_msgs::msg::SolverArray get_solve_array(
-    const std::string & domain, const std::string & problem, std::string action_file);
+    const std::string & domain, const std::string & problem, const std::string & question, std::string action_file);
 
   void action_hub_callback(plansys2_msgs::msg::ActionExecution::UniquePtr msg);
 

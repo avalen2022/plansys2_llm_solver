@@ -213,7 +213,7 @@ SolverNode::get_solve_service_callback(
 {
   (void) request_header;
   std::string action_file = read_file(action_file_path_);
-  auto solves = get_solve_array(request->domain, request->problem, action_file);
+  auto solves = get_solve_array(request->domain, request->problem, request->question, action_file);
 
   if (!solves.solver_array.empty()) {
     response->status = plansys2_msgs::srv::GetSolve::Response::SUCCESS;
@@ -225,7 +225,7 @@ SolverNode::get_solve_service_callback(
 }
 
 plansys2_msgs::msg::SolverArray
-SolverNode::get_solve_array(const std::string & domain, const std::string & problem, const std::string action_file)
+SolverNode::get_solve_array(const std::string & domain, const std::string & problem, const std::string & question, const std::string action_file)
 {
   std::map<std::string, std::future<std::optional<plansys2_msgs::msg::Solver>>> futures;
   std::map<std::string, std::optional<plansys2_msgs::msg::Solver>> results;
@@ -233,7 +233,7 @@ SolverNode::get_solve_array(const std::string & domain, const std::string & prob
   for (auto & resol : resolutors_) {
     futures[resol.first] = std::async(std::launch::async,
       &plansys2::SolverBase::solve, resol.second,
-      domain, problem, action_file, get_namespace(), resolution_timeout_);
+      domain, problem, question, action_file, get_namespace(), resolution_timeout_);
   }
 
   auto start = now();

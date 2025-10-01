@@ -84,7 +84,8 @@ LLAMASolver::create_folders(const std::string & node_namespace)
 }
 
 std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
-  const std::string & domain, const std::string & problem, 
+  const std::string & domain, const std::string & problem,
+  const std::string & question,
   const std::string & action_file,
   const std::string & node_namespace,
   const rclcpp::Duration resolution_timeout)
@@ -108,6 +109,12 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   std::ofstream problem_out(problem_file_path);
   problem_out << problem;
   problem_out.close();
+
+  const auto question_file_path = output_dir / std::filesystem::path("solver_question.pddl");
+  std::ofstream question_out(question_file_path);
+  question_out << question;
+  question_out.close();
+
 
   const auto resolution_file_path = output_dir / std::filesystem::path("solver_resolution.txt");
   const auto solver_file_path = output_dir / std::filesystem::path("solver");
@@ -144,7 +151,7 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     "Domain:\n" + domain + "\n\n"
     "Problem:\n" + problem + "\n\n"
     "Action_hub:\n" + action_file + "\n\n"
-    "Question: I want you to analyze the action_hub and tell me what to fix in the domain and problem in order to solve the failure of the action that is failing\"";
+    "Question:\n" + question + "\"";
 
   std::string prompt_cmd = "ros2 llama prompt " + prompt_text + " -t 0.0 > " + resolution_file_path.c_str();
   int ret = std::system(prompt_cmd.c_str());
