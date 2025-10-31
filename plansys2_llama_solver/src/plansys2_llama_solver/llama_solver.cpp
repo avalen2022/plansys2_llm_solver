@@ -139,7 +139,7 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     }
 
     const char * home_dir = std::getenv("HOME");
-    std::string yaml_path = std::string(home_dir) + "/TFG/src/llama_ros/llama_bringup/models/StableLM-Zephyr.yaml";
+    std::string yaml_path = std::string(home_dir) + "/TFG/src/llama_ros/llama_bringup/models/Qwen3.yaml";
     execlp("ros2", "ros2", "llama", "launch", yaml_path.c_str(), NULL);
     exit(EXIT_FAILURE);
   }

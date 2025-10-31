@@ -26,6 +26,8 @@ SolverNode::SolverNode()
 
 SolverNode::~SolverNode()
 {
+  resolutors_.clear();
+
   std::vector<std::string> loaded_libraries = lp_loader_.getRegisteredLibraries();
 
   for (const auto & library : loaded_libraries) {
