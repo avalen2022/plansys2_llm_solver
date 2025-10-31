@@ -19,6 +19,7 @@ find_package(lifecycle_msgs REQUIRED)
 
 set(SOLVER_SOURCES
   src/plansys2_solver/SolverNode.cpp
+  src/plansys2_solver/SolverClient.cpp
 )
 add_library(${PROJECT_NAME} SHARED ${SOLVER_SOURCES})
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -53,6 +54,20 @@ target_link_libraries(solver_node
   rclcpp::rclcpp
 )
 
+add_executable(solver_client
+  src/solver_client.cpp
+)
+target_include_directories(solver_client PRIVATE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+)
+target_compile_definitions(solver_client PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
+target_link_libraries(solver_client
+  PRIVATE
+  ${PROJECT_NAME}
+  rclcpp::rclcpp
+)
+
 install(DIRECTORY include/
   DESTINATION include/${PROJECT_NAME}
 )
@@ -72,7 +87,7 @@ install(TARGETS ${PROJECT_NAME}
   RUNTIME DESTINATION bin
 )
 
-install(TARGETS solver_node
+install(TARGETS solver_node solver_client
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
