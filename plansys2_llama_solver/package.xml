@@ -11,10 +11,10 @@
 
   <depend>rclcpp</depend>
 
-  <depend>plansys2_core</depend>
+  <depend>plansys2_solver</depend>
   <depend>pluginlib</depend>
 
-  <exec_depend>popf</exec_depend>
+  <exec_depend>llama_cli</exec_depend>
 
   <test_depend>ament_lint_common</test_depend>
   <test_depend>ament_lint_auto</test_depend>
@@ -24,6 +24,6 @@
 
   <export>
     <build_type>ament_cmake</build_type>
-    <plansys2_core plugin="${prefix}/plansys2_llama_solver_plugin.xml" />
+    <plansys2_solver plugin="${prefix}/plansys2_llama_solver_plugin.xml" />
   </export>
 </package>
