@@ -150,12 +150,29 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   // No sleep needed: ros2 llama prompt internally calls wait_for_server()
   // which blocks until llama_ros finishes loading the model
 
+  // Build prompt: solver owns the JSON format requirement (needs it to parse classification),
+  // controller owns the observation/question content
   std::string prompt_text =
-    "-- Contents ---\n"
-    "Domain:\n" + domain + "\n\n"
-    "Problem:\n" + problem + "\n\n"
-    "Action_hub:\n" + action_file + "\n\n"
-    "Question:\n" + question;
+    "You are a PDDL state update assistant. Given a PDDL domain, problem state, "
+    "action execution log, and an observation, determine what state changes are needed.\n\n"
+    "RULES:\n"
+    "- Only change predicates directly affected by the observation\n"
+    "- Do NOT change predicates for objects not mentioned\n"
+    "- If an object moved from A to B: remove (object_at obj A), add (object_at obj B)\n"
+    "- If no changes are needed, classify as CORRECT\n\n"
+    "--- Domain ---\n" + domain + "\n\n"
+    "--- Problem ---\n" + problem + "\n\n"
+    "--- Action execution log ---\n" + action_file + "\n\n"
+    "--- Observation ---\n" + question + "\n\n"
+    "Reply ONLY with a JSON object in this exact format:\n"
+    "{\n"
+    "  \"classification\": \"MODIFY_PLAN\" or \"CORRECT\" or \"UNSOLVABLE\",\n"
+    "  \"reasoning\": \"brief explanation\",\n"
+    "  \"remove_predicates\": [\"(predicate1)\", \"(predicate2)\"],\n"
+    "  \"add_predicates\": [\"(predicate1)\", \"(predicate2)\"],\n"
+    "  \"add_instances\": [],\n"
+    "  \"domain_changes\": []\n"
+    "}";
 
   // Fork + execlp to send prompt — passes prompt as argv, no shell interpretation
   pid_t prompt_pid = fork();
