@@ -16,6 +16,7 @@ solver:
     solver_timeout: 240.0
     solver_plugins: ["LLAMA"]
     LLAMA.llm_debug: true
+    LLAMA.model_yaml: "~/TFG/src/llama_ros/llama_bringup/models/Phi-4.yaml"
     LLAMA:
       plugin: "plansys2/LLAMASolver"
 executor:

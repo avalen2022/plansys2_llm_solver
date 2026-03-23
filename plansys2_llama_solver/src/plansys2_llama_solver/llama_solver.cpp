@@ -90,6 +90,7 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   const std::string & node_namespace,
   const rclcpp::Duration resolution_timeout)
 {
+  cancel_requested_ = false;
   plansys2_msgs::msg::Solver solution;
 
   const auto output_dir_maybe = create_folders(node_namespace);
@@ -139,7 +140,7 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     }
 
     const char * home_dir = std::getenv("HOME");
-    std::string yaml_path = std::string(home_dir) + "/TFG/src/llama_ros/llama_bringup/models/Qwen3.yaml";
+    std::string yaml_path = std::string(home_dir) + "/TFG/src/llama_ros/llama_bringup/models/Phi-4.yaml";
     execlp("ros2", "ros2", "llama", "launch", yaml_path.c_str(), NULL);
     exit(EXIT_FAILURE);
   }
