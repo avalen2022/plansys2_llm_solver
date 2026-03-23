@@ -145,7 +145,8 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     exit(EXIT_FAILURE);
   }
 
-  std::this_thread::sleep_for(std::chrono::seconds(10));
+  // No sleep needed: ros2 llama prompt internally calls wait_for_server()
+  // which blocks until llama_ros finishes loading the model
 
   std::string prompt_text =
     "\"-- Contents ---\n"
