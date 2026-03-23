@@ -6,6 +6,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(plansys2_solver REQUIRED)
 find_package(pluginlib REQUIRED)
+find_package(nlohmann_json REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/plansys2_llama_solver/llama_solver.cpp
@@ -20,6 +21,7 @@ target_link_libraries(${PROJECT_NAME}
   PRIVATE
   pluginlib::pluginlib
   rclcpp::rclcpp
+  nlohmann_json::nlohmann_json
 )
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
