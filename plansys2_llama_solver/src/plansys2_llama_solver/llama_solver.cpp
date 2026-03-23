@@ -17,6 +17,8 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 
+#include <nlohmann/json.hpp>
+
 #include "plansys2_llama_solver/llama_solver.hpp"
 #include "rclcpp/logging.hpp"
 
@@ -149,25 +151,63 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   // which blocks until llama_ros finishes loading the model
 
   std::string prompt_text =
-    "\"-- Contents ---\n"
+    "-- Contents ---\n"
     "Domain:\n" + domain + "\n\n"
     "Problem:\n" + problem + "\n\n"
     "Action_hub:\n" + action_file + "\n\n"
-    "Question:\n" + question + "\"";
+    "Question:\n" + question;
 
-  std::string prompt_cmd = "ros2 llama prompt " + prompt_text + " -t 0.0 > " + resolution_file_path.c_str();
-  int ret = std::system(prompt_cmd.c_str());
+  // Fork + execlp to send prompt — passes prompt as argv, no shell interpretation
+  pid_t prompt_pid = fork();
+  if (prompt_pid == 0) {
+    int fd = open(resolution_file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd != -1) {
+      dup2(fd, STDOUT_FILENO);
+      close(fd);
+    }
+    execlp("ros2", "ros2", "llama", "prompt", prompt_text.c_str(), "-t", "0.0", NULL);
+    _exit(EXIT_FAILURE);
+  }
+  waitpid(prompt_pid, NULL, 0);
 
   kill(pid, SIGINT);
   waitpid(pid, NULL, 0);
 
-  solution.modifier_flag = true;
-
+  // Read LLM response from file
+  std::string raw_response;
   std::ifstream file(resolution_file_path);
   if (file) {
     std::stringstream buffer;
     buffer << file.rdbuf();
-    solution.resolution = buffer.str();
+    raw_response = buffer.str();
+  }
+
+  solution.resolution = raw_response;
+
+  // Parse classification from JSON to set modifier_flag correctly
+  try {
+    // Extract JSON from response (handles LLM wrapping with extra text)
+    std::string json_str = raw_response;
+    auto json_start = raw_response.find('{');
+    auto json_end = raw_response.rfind('}');
+    if (json_start != std::string::npos && json_end != std::string::npos && json_end > json_start) {
+      json_str = raw_response.substr(json_start, json_end - json_start + 1);
+    }
+
+    auto j = nlohmann::json::parse(json_str);
+    std::string classification = j.value("classification", "MODIFY_PLAN");
+    solution.modifier_flag = (classification != "CORRECT");
+
+    RCLCPP_DEBUG(lc_node_->get_logger(),
+      "[%s-llama] Classification: %s, modifier_flag: %s",
+      lc_node_->get_name(), classification.c_str(),
+      solution.modifier_flag ? "true" : "false");
+  } catch (const nlohmann::json::exception & e) {
+    // JSON parse failed — fallback to assuming changes are needed
+    RCLCPP_WARN(lc_node_->get_logger(),
+      "[%s-llama] Failed to parse JSON classification, defaulting to modifier_flag=true: %s",
+      lc_node_->get_name(), e.what());
+    solution.modifier_flag = true;
   }
 
   return solution;
