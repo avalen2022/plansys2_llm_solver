@@ -15,6 +15,7 @@
 
 #include <fstream>
 #include <fcntl.h>
+#include <sstream>
 #include <sys/wait.h>
 
 #include <nlohmann/json.hpp>
@@ -85,6 +86,76 @@ LLAMASolver::create_folders(const std::string & node_namespace)
   return output_path;
 }
 
+std::string LLAMASolver::summarize_action_log(const std::string & raw_log)
+{
+  // Parse the raw action hub log and produce a compact summary.
+  // Only keeps FINISH (Type: 6) and CANCEL (Type: 7) entries —
+  // one line per completed/failed action with the final status message.
+  std::string summary;
+  std::istringstream stream(raw_log);
+  std::string line;
+
+  std::string current_action;
+  std::string current_args;
+  std::string current_status;
+  std::string current_type;
+  bool current_success = false;
+  bool in_entry = false;
+  bool reading_args = false;
+
+  while (std::getline(stream, line)) {
+    if (line.find("----") == 0) {
+      // End of previous entry — only keep FINISH/CANCEL entries
+      if (in_entry && !current_action.empty()) {
+        bool is_finish = (current_type == "6" || current_type == "7");
+
+        if (is_finish) {
+          std::string result = current_success ? "SUCCESS" : "FAILED";
+          summary += current_action + " " + current_args + ": " + result;
+          if (!current_status.empty()) {
+            summary += ". " + current_status;
+          }
+          summary += "\n";
+        }
+      }
+      // Reset for next entry
+      in_entry = true;
+      current_action.clear();
+      current_args.clear();
+      current_status.clear();
+      current_type.clear();
+      current_success = false;
+      reading_args = false;
+      continue;
+    }
+
+    if (line.find("Action: ") == 0) {
+      current_action = line.substr(8);
+      reading_args = false;
+    } else if (line.find("Type: ") == 0) {
+      current_type = line.substr(6);
+    } else if (line.find("Arguments:") == 0) {
+      reading_args = true;
+    } else if (reading_args && line.find("  - ") == 0) {
+      if (!current_args.empty()) current_args += " ";
+      current_args += line.substr(4);
+    } else if (line.find("Success: ") == 0) {
+      current_success = (line.substr(9) == "true");
+      reading_args = false;
+    } else if (line.find("Status: ") == 0) {
+      current_status = line.substr(8);
+      reading_args = false;
+    } else {
+      reading_args = false;
+    }
+  }
+
+  if (summary.empty()) {
+    return "(no action log available)";
+  }
+  return summary;
+}
+
 std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   const std::string & domain, const std::string & problem,
   const std::string & question,
@@ -150,6 +221,16 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   // No sleep needed: ros2 llama prompt internally calls wait_for_server()
   // which blocks until llama_ros finishes loading the model
 
+  // Summarize the raw action hub into a compact log for the LLM.
+  // The raw log can be 100KB+ of repetitive BT tick entries;
+  // the summary keeps only completed actions and perception observations.
+  std::string action_summary = summarize_action_log(action_file);
+
+  RCLCPP_INFO(
+    lc_node_->get_logger(),
+    "[%s-llama] Action log summarized: %zu chars (raw: %zu chars)",
+    lc_node_->get_name(), action_summary.size(), action_file.size());
+
   // Build prompt: solver owns the JSON format requirement (needs it to parse classification),
   // controller owns the observation/question content
   std::string prompt_text =
@@ -162,7 +243,7 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     "- If no changes are needed, classify as CORRECT\n\n"
     "--- Domain ---\n" + domain + "\n\n"
     "--- Problem ---\n" + problem + "\n\n"
-    "--- Action execution log ---\n" + action_file + "\n\n"
+    "--- Action execution log ---\n" + action_summary + "\n\n"
     "--- Observation ---\n" + question + "\n\n"
     "Reply ONLY with a JSON object in this exact format:\n"
     "{\n"

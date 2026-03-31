@@ -69,6 +69,11 @@ public:
     const std::string & node_namespace = "",
     const rclcpp::Duration resolution_timeout = 15s) override;
 
+  // Summarize the raw action hub log into a compact format for the LLM.
+  // Keeps only FINISH (type 6) entries — one line per completed/failed action
+  // with the final status message (which includes perception and check results).
+  static std::string summarize_action_log(const std::string & raw_log);
+
 private:
   std::string arguments_parameter_name_;
   std::string output_dir_parameter_name_;
