@@ -39,6 +39,7 @@ void LLAMASolver::configure(
   arguments_parameter_name_ = plugin_name + ".arguments";
   output_dir_parameter_name_ = plugin_name + ".output_dir";
   llm_debug_parameter_ = plugin_name + ".llm_debug";
+  summarize_mode_parameter_ = plugin_name + ".summarize_mode";
 
   if (!lc_node_->has_parameter(arguments_parameter_name_)) {
     lc_node_->declare_parameter<std::string>(arguments_parameter_name_, "");
@@ -49,6 +50,11 @@ void LLAMASolver::configure(
   }
   if (!lc_node_->has_parameter(llm_debug_parameter_)) {
     lc_node_->declare_parameter<bool>(llm_debug_parameter_, false);
+  }
+  if (!lc_node_->has_parameter(summarize_mode_parameter_)) {
+    // "limited" = only FINISH/CANCEL entries (compact, fits small context windows)
+    // "full" = all entries in compact one-line format (needs larger context window)
+    lc_node_->declare_parameter<std::string>(summarize_mode_parameter_, "limited");
   }
 }
 
@@ -86,11 +92,17 @@ LLAMASolver::create_folders(const std::string & node_namespace)
   return output_path;
 }
 
-std::string LLAMASolver::summarize_action_log(const std::string & raw_log)
+std::string LLAMASolver::summarize_action_log(
+  const std::string & raw_log, bool limited)
 {
-  // Parse the raw action hub log and produce a compact summary.
-  // Only keeps FINISH (Type: 6) and CANCEL (Type: 7) entries —
-  // one line per completed/failed action with the final status message.
+  // Parse the raw action hub log and produce a compact one-line-per-entry summary.
+  // Two modes controlled by limited:
+  //   true  (default) — only FINISH/CANCEL entries (compact, fits small context windows)
+  //   false ("full")  — all entries in compact format (needs larger context window)
+  // Type mapping: 1=REQUEST, 2=RESPONSE, 3=CONFIRM, 4=REJECT, 5=FEEDBACK, 6=FINISH, 7=CANCEL
+  static const char * type_names[] = {
+    "", "REQUEST", "RESPONSE", "CONFIRM", "REJECT", "FEEDBACK", "FINISH", "CANCEL"};
+
   std::string summary;
   std::istringstream stream(raw_log);
   std::string line;
@@ -98,32 +110,40 @@ std::string LLAMASolver::summarize_action_log(const std::string & raw_log)
   std::string current_action;
   std::string current_args;
   std::string current_status;
-  std::string current_type;
+  int current_type = 0;
   bool current_success = false;
   bool in_entry = false;
   bool reading_args = false;
 
   while (std::getline(stream, line)) {
     if (line.find("----") == 0) {
-      // End of previous entry — only keep FINISH/CANCEL entries
       if (in_entry && !current_action.empty()) {
-        bool is_finish = (current_type == "6" || current_type == "7");
+        bool keep = !limited ||
+          (current_type == 6 || current_type == 7);
 
-        if (is_finish) {
+        if (keep) {
+          const char * tname = (current_type >= 1 && current_type <= 7)
+            ? type_names[current_type] : "UNKNOWN";
           std::string result = current_success ? "SUCCESS" : "FAILED";
-          summary += current_action + " " + current_args + ": " + result;
+
+          if (limited) {
+            // Compact: no type tag needed (all are FINISH/CANCEL)
+            summary += current_action + "(" + current_args + "): " + result;
+          } else {
+            summary += std::string("[") + tname + "] " +
+              current_action + "(" + current_args + "): " + result;
+          }
           if (!current_status.empty()) {
             summary += ". " + current_status;
           }
           summary += "\n";
         }
       }
-      // Reset for next entry
       in_entry = true;
       current_action.clear();
       current_args.clear();
       current_status.clear();
-      current_type.clear();
+      current_type = 0;
       current_success = false;
       reading_args = false;
       continue;
@@ -133,7 +153,7 @@ std::string LLAMASolver::summarize_action_log(const std::string & raw_log)
       current_action = line.substr(8);
       reading_args = false;
     } else if (line.find("Type: ") == 0) {
-      current_type = line.substr(6);
+      current_type = std::atoi(line.substr(6).c_str());
     } else if (line.find("Arguments:") == 0) {
       reading_args = true;
     } else if (reading_args && line.find("  - ") == 0) {
@@ -222,9 +242,10 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   // which blocks until llama_ros finishes loading the model
 
   // Summarize the raw action hub into a compact log for the LLM.
-  // The raw log can be 100KB+ of repetitive BT tick entries;
-  // the summary keeps only completed actions and perception observations.
-  std::string action_summary = summarize_action_log(action_file);
+  // Mode is configurable: "limited" (default) or "full".
+  std::string mode = lc_node_->get_parameter(summarize_mode_parameter_).as_string();
+  bool limited = (mode != "full");
+  std::string action_summary = summarize_action_log(action_file, limited);
 
   RCLCPP_INFO(
     lc_node_->get_logger(),

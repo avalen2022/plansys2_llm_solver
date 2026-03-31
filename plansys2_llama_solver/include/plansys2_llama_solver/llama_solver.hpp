@@ -70,14 +70,16 @@ public:
     const rclcpp::Duration resolution_timeout = 15s) override;
 
   // Summarize the raw action hub log into a compact format for the LLM.
-  // Keeps only FINISH (type 6) entries — one line per completed/failed action
-  // with the final status message (which includes perception and check results).
-  static std::string summarize_action_log(const std::string & raw_log);
+  // limited=true:  only FINISH/CANCEL entries (compact, fits small context windows)
+  // limited=false: all entries in compact one-line format (needs larger context)
+  static std::string summarize_action_log(
+    const std::string & raw_log, bool limited = true);
 
 private:
   std::string arguments_parameter_name_;
   std::string output_dir_parameter_name_;
   std::string llm_debug_parameter_;
+  std::string summarize_mode_parameter_;
   bool cancel_requested_;
 
 };
