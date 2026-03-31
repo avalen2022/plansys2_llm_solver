@@ -173,14 +173,17 @@ SolverNode::on_error(const rclcpp_lifecycle::State & state)
 
 void SolverNode::action_hub_callback(plansys2_msgs::msg::ActionExecution::UniquePtr msg)
 {
-  if (msg == msg_) {
+  // Deduplicate by comparing content fields, not pointers.
+  // Skip if same action, type, status, success AND completion hasn't changed
+  // significantly (within 0.30 threshold — avoids logging every small progress tick).
+  if (msg_ != nullptr &&
+      msg->action == msg_->action &&
+      msg->type == msg_->type &&
+      msg->status == msg_->status &&
+      msg->success == msg_->success &&
+      std::abs(msg->completion - msg_->completion) < 0.30f)
+  {
     return;
-  }
-
-  if (msg->success == false && msg->completion != 0) {
-    if (msg_ != nullptr && (msg_->completion + 0.30f >= msg->completion)) {
-      return;
-    }
   }
 
   std::ofstream action_file_(action_file_path_, std::ios::app);
