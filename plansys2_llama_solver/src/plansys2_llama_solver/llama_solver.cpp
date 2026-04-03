@@ -56,6 +56,12 @@ void LLAMASolver::configure(
     // "full" = all entries in compact one-line format (needs larger context window)
     lc_node_->declare_parameter<std::string>(summarize_mode_parameter_, "limited");
   }
+
+  model_yaml_parameter_name_ = plugin_name + ".model_yaml";
+  if (!lc_node_->has_parameter(model_yaml_parameter_name_)) {
+    lc_node_->declare_parameter<std::string>(
+      model_yaml_parameter_name_, "~/TFG/src/llama_ros/llama_bringup/models/Phi-4.yaml");
+  }
 }
 
 std::optional<std::filesystem::path>
@@ -233,7 +239,10 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     }
 
     const char * home_dir = std::getenv("HOME");
-    std::string yaml_path = std::string(home_dir) + "/TFG/src/llama_ros/llama_bringup/models/Phi-4.yaml";
+    std::string yaml_path = lc_node_->get_parameter(model_yaml_parameter_name_).as_string();
+    if (!yaml_path.empty() && yaml_path[0] == '~' && home_dir) {
+      yaml_path.replace(0, 1, std::string(home_dir));
+    }
     execlp("ros2", "ros2", "llama", "launch", yaml_path.c_str(), NULL);
     exit(EXIT_FAILURE);
   }

@@ -80,6 +80,7 @@ private:
   std::string output_dir_parameter_name_;
   std::string llm_debug_parameter_;
   std::string summarize_mode_parameter_;
+  std::string model_yaml_parameter_name_;
   bool cancel_requested_;
 
 };
