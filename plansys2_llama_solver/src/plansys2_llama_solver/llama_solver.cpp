@@ -60,7 +60,7 @@ void LLAMASolver::configure(
   model_yaml_parameter_name_ = plugin_name + ".model_yaml";
   if (!lc_node_->has_parameter(model_yaml_parameter_name_)) {
     lc_node_->declare_parameter<std::string>(
-      model_yaml_parameter_name_, "~/TFG/src/llama_ros/llama_bringup/models/Phi-4.yaml");
+      model_yaml_parameter_name_, "~/TFG/src/llm/llama_ros/llama_bringup/models/Qwen2.5-3B.yaml");
   }
 }
 
