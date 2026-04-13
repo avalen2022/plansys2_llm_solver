@@ -13,10 +13,13 @@
 // limitations under the License.
 
 
+#include <chrono>
 #include <fstream>
 #include <fcntl.h>
 #include <sstream>
+#include <thread>
 #include <sys/wait.h>
+#include <unistd.h>
 
 #include <nlohmann/json.hpp>
 
@@ -50,6 +53,10 @@ void LLAMASolver::configure(
   }
   if (!lc_node_->has_parameter(llm_debug_parameter_)) {
     lc_node_->declare_parameter<bool>(llm_debug_parameter_, false);
+  }
+  prompt_debug_parameter_ = plugin_name + ".prompt_debug";
+  if (!lc_node_->has_parameter(prompt_debug_parameter_)) {
+    lc_node_->declare_parameter<bool>(prompt_debug_parameter_, false);
   }
   if (!lc_node_->has_parameter(summarize_mode_parameter_)) {
     // "limited" = only FINISH/CANCEL entries (compact, fits small context windows)
@@ -220,22 +227,36 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   const auto solver_file_path = output_dir / std::filesystem::path("solver");
 
   const auto args = lc_node_->get_parameter(arguments_parameter_name_).value_to_string();
-  bool flag = lc_node_->get_parameter(llm_debug_parameter_).as_bool();
+  bool llm_debug = lc_node_->get_parameter(llm_debug_parameter_).as_bool();
+  bool prompt_debug = lc_node_->get_parameter(prompt_debug_parameter_).as_bool();
+  auto logger = lc_node_->get_logger();
 
+  RCLCPP_INFO(logger,
+    "[llama-solver] Starting solve (timeout=%.0fs, llm_debug=%s, prompt_debug=%s)",
+    resolution_timeout.seconds(),
+    llm_debug ? "true" : "false",
+    prompt_debug ? "true" : "false");
 
-  RCLCPP_DEBUG(
-    lc_node_->get_logger(),
-    "[%s-llama] called with timeout %f seconds with args [%s] with output dir %s",
-    lc_node_->get_name(), resolution_timeout.seconds(), args.c_str(), output_dir.c_str());
+  // --- Fork: launch LLM server ---
+  int launch_pipe[2] = {-1, -1};
+  if (llm_debug) {
+    pipe(launch_pipe);
+  }
 
   pid_t pid = fork();
-
   if (pid == 0) {
-    int fd = open("/dev/null", O_WRONLY);
-    if (fd != -1 && flag == false) {
-      dup2(fd, STDOUT_FILENO);
-      dup2(fd, STDERR_FILENO);
-      close(fd);
+    if (llm_debug) {
+      close(launch_pipe[0]);
+      dup2(launch_pipe[1], STDOUT_FILENO);
+      dup2(launch_pipe[1], STDERR_FILENO);
+      close(launch_pipe[1]);
+    } else {
+      int fd = open("/dev/null", O_WRONLY);
+      if (fd != -1) {
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+        close(fd);
+      }
     }
 
     const char * home_dir = std::getenv("HOME");
@@ -243,26 +264,49 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     if (!yaml_path.empty() && yaml_path[0] == '~' && home_dir) {
       yaml_path.replace(0, 1, std::string(home_dir));
     }
+    RCLCPP_INFO(logger, "[llama-launch] Starting model: %s", yaml_path.c_str());
     execlp("ros2", "ros2", "llama", "launch", yaml_path.c_str(), NULL);
     exit(EXIT_FAILURE);
   }
 
-  // No sleep needed: ros2 llama prompt internally calls wait_for_server()
-  // which blocks until llama_ros finishes loading the model
+  // Drain launch stdout in background thread (real-time logging)
+  std::thread launch_drain;
+  if (llm_debug) {
+    close(launch_pipe[1]);
+    launch_drain = std::thread([fd = launch_pipe[0], logger]() {
+      char buf[512];
+      std::string line_buf;
+      ssize_t n;
+      while ((n = read(fd, buf, sizeof(buf) - 1)) > 0) {
+        buf[n] = '\0';
+        line_buf += buf;
+        // Log complete lines as they arrive
+        size_t pos;
+        while ((pos = line_buf.find('\n')) != std::string::npos) {
+          std::string line = line_buf.substr(0, pos);
+          if (!line.empty()) {
+            RCLCPP_INFO(logger, "[llama-launch] %s", line.c_str());
+          }
+          line_buf.erase(0, pos + 1);
+        }
+      }
+      if (!line_buf.empty()) {
+        RCLCPP_INFO(logger, "[llama-launch] %s", line_buf.c_str());
+      }
+      close(fd);
+    });
+  }
 
   // Summarize the raw action hub into a compact log for the LLM.
-  // Mode is configurable: "limited" (default) or "full".
   std::string mode = lc_node_->get_parameter(summarize_mode_parameter_).as_string();
   bool limited = (mode != "full");
   std::string action_summary = summarize_action_log(action_file, limited);
 
-  RCLCPP_INFO(
-    lc_node_->get_logger(),
-    "[%s-llama] Action log summarized: %zu chars (raw: %zu chars)",
-    lc_node_->get_name(), action_summary.size(), action_file.size());
+  RCLCPP_INFO(logger,
+    "[llama-solver] Action log summarized: %zu chars (raw: %zu chars)",
+    action_summary.size(), action_file.size());
 
-  // Build prompt: solver owns the JSON format requirement (needs it to parse classification),
-  // controller owns the observation/question content
+  // Build prompt
   std::string prompt_text =
     "You are a PDDL state update assistant. Given a PDDL domain, problem state, "
     "action execution log, and an observation, determine what state changes are needed.\n\n"
@@ -285,29 +329,56 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     "  \"domain_changes\": []\n"
     "}";
 
-  // Fork + execlp to send prompt — passes prompt as argv, no shell interpretation
+  if (prompt_debug) {
+    RCLCPP_INFO(logger, "[llama-prompt] Sending prompt (%zu chars):\n%s",
+      prompt_text.size(), prompt_text.c_str());
+  }
+
+  // --- Fork: send prompt via pipe (tee to file + optional logging) ---
+  int prompt_pipe[2];
+  pipe(prompt_pipe);
+
+  auto t_start = std::chrono::steady_clock::now();
+
   pid_t prompt_pid = fork();
   if (prompt_pid == 0) {
-    int fd = open(resolution_file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd != -1) {
-      dup2(fd, STDOUT_FILENO);
-      close(fd);
-    }
+    close(prompt_pipe[0]);
+    dup2(prompt_pipe[1], STDOUT_FILENO);
+    close(prompt_pipe[1]);
     execlp("ros2", "ros2", "llama", "prompt", prompt_text.c_str(), "-t", "0.0", NULL);
     _exit(EXIT_FAILURE);
   }
+
+  // Parent: read pipe, write to resolution file, optionally log in real-time
+  close(prompt_pipe[1]);
+  std::ofstream resolution_out(resolution_file_path);
+  std::string raw_response;
+  char buf[512];
+  ssize_t n;
+
+  while ((n = read(prompt_pipe[0], buf, sizeof(buf) - 1)) > 0) {
+    buf[n] = '\0';
+    resolution_out.write(buf, n);
+    raw_response.append(buf, n);
+    if (prompt_debug) {
+      RCLCPP_INFO(logger, "[llama-response] %s", buf);
+    }
+  }
+  close(prompt_pipe[0]);
+  resolution_out.close();
   waitpid(prompt_pid, NULL, 0);
 
+  auto t_end = std::chrono::steady_clock::now();
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
+
+  RCLCPP_INFO(logger, "[llama-solver] LLM inference completed in %ld ms (%zu chars response)",
+    elapsed_ms, raw_response.size());
+
+  // Shutdown LLM server
   kill(pid, SIGINT);
   waitpid(pid, NULL, 0);
-
-  // Read LLM response from file
-  std::string raw_response;
-  std::ifstream file(resolution_file_path);
-  if (file) {
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    raw_response = buffer.str();
+  if (launch_drain.joinable()) {
+    launch_drain.join();
   }
 
   solution.resolution = raw_response;
@@ -326,10 +397,12 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     std::string classification = j.value("classification", "MODIFY_PLAN");
     solution.modifier_flag = (classification != "CORRECT");
 
-    RCLCPP_DEBUG(lc_node_->get_logger(),
-      "[%s-llama] Classification: %s, modifier_flag: %s",
-      lc_node_->get_name(), classification.c_str(),
-      solution.modifier_flag ? "true" : "false");
+    std::string reasoning = j.value("reasoning", "");
+    RCLCPP_INFO(lc_node_->get_logger(),
+      "[llama-solver] Classification: %s | modifier_flag: %s | Reasoning: %s",
+      classification.c_str(),
+      solution.modifier_flag ? "true" : "false",
+      reasoning.c_str());
   } catch (const nlohmann::json::exception & e) {
     // JSON parse failed — fallback to assuming changes are needed
     RCLCPP_WARN(lc_node_->get_logger(),
