@@ -9,7 +9,7 @@
 
 #include "plansys2_solver/SolverInterface.hpp"
 
-#include "plansys2_msgs/srv/get_solve.hpp"
+#include "plansys2_solver_msgs/srv/get_solve.hpp"
 
 #include "rclcpp/rclcpp.hpp"
 
@@ -20,19 +20,19 @@ class SolverClient : public SolverInterface
 public:
     SolverClient();
 
-    std::optional<plansys2_msgs::msg::Solver> getReplanificateSolve(
+    std::optional<plansys2_solver_msgs::msg::Solver> getReplanificateSolve(
         const std::string & domain, const std::string & problem,
         const std::string & prompt,
         const std::string & node_namespace = "");
 
 
-    std::optional<plansys2_msgs::msg::SolverArray> getReplanificateSolveArray(
+    std::optional<plansys2_solver_msgs::msg::SolverArray> getReplanificateSolveArray(
         const std::string & domain, const std::string & problem,
         const std::string & prompt,
         const std::string & node_namespace = "");
 
 private:
-    rclcpp::Client<plansys2_msgs::srv::GetSolve>::SharedPtr
+    rclcpp::Client<plansys2_solver_msgs::srv::GetSolve>::SharedPtr
         get_solve_client_;
 
     rclcpp::Node::SharedPtr node_;

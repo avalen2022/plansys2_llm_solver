@@ -62,7 +62,7 @@ public:
 
   void initialize(const std::string & node_name) override;
 
-  virtual std::optional<plansys2_msgs::msg::Solver> solve(
+  virtual std::optional<plansys2_solver_msgs::msg::Solver> solve(
     const std::string & domain, const std::string & problem,
     const std::string & question,
     const std::string & action_file,

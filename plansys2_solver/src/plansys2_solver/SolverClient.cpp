@@ -21,7 +21,7 @@ SolverClient::SolverClient()
 {
   node_ = rclcpp::Node::make_shared("solver_client");
 
-  get_solve_client_ = node_->create_client<plansys2_msgs::srv::GetSolve>("solver/get_solve");
+  get_solve_client_ = node_->create_client<plansys2_solver_msgs::srv::GetSolve>("solver/get_solve");
 
   double timeout = 240;
   node_->declare_parameter("solver_timeout", timeout);
@@ -33,7 +33,7 @@ SolverClient::SolverClient()
     solver_timeout_.seconds());
 }
 
-std::optional<plansys2_msgs::msg::Solver>
+std::optional<plansys2_solver_msgs::msg::Solver>
 SolverClient::getReplanificateSolve(
   const std::string & domain, const std::string & problem,
   const std::string & prompt,
@@ -57,7 +57,7 @@ SolverClient::getReplanificateSolve(
 
   RCLCPP_DEBUG(node_->get_logger(), "Get Solver service call with time out %d", timeout);
 
-  auto request = std::make_shared<plansys2_msgs::srv::GetSolve::Request>();
+  auto request = std::make_shared<plansys2_solver_msgs::srv::GetSolve::Request>();
   request->domain = domain;
   request->problem = problem;
   request->question = prompt;
@@ -78,7 +78,7 @@ SolverClient::getReplanificateSolve(
 
   auto result = *future_result.get();
 
-  if (result.status == plansys2_msgs::srv::GetSolve::Response::SUCCESS) {
+  if (result.status == plansys2_solver_msgs::srv::GetSolve::Response::SUCCESS) {
     return result.solver;
   } else {
     RCLCPP_ERROR_STREAM(
@@ -89,7 +89,7 @@ SolverClient::getReplanificateSolve(
   }
 }
 
-std::optional<plansys2_msgs::msg::SolverArray>
+std::optional<plansys2_solver_msgs::msg::SolverArray>
 plansys2::SolverClient::getReplanificateSolveArray(
     const std::string & domain,
     const std::string & problem,

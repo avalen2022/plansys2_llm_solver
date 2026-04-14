@@ -12,8 +12,8 @@
 #include "lifecycle_msgs/msg/state.hpp"
 #include "lifecycle_msgs/msg/transition.hpp"
 #include "plansys2_msgs/msg/action_execution.hpp"
-#include "plansys2_msgs/msg/solver_array.hpp"
-#include "plansys2_msgs/srv/get_solve.hpp"
+#include "plansys2_solver_msgs/msg/solver_array.hpp"
+#include "plansys2_solver_msgs/srv/get_solve.hpp"
 
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -96,10 +96,10 @@ public:
    */
   void get_solve_service_callback(
     const std::shared_ptr<rmw_request_id_t> request_header,
-    const std::shared_ptr<plansys2_msgs::srv::GetSolve::Request> request,
-    const std::shared_ptr<plansys2_msgs::srv::GetSolve::Response> response);
+    const std::shared_ptr<plansys2_solver_msgs::srv::GetSolve::Request> request,
+    const std::shared_ptr<plansys2_solver_msgs::srv::GetSolve::Response> response);
 
-  plansys2_msgs::msg::SolverArray get_solve_array(
+  plansys2_solver_msgs::msg::SolverArray get_solve_array(
     const std::string & domain, const std::string & problem, const std::string & question, std::string action_file);
 
   void action_hub_callback(plansys2_msgs::msg::ActionExecution::UniquePtr msg);
@@ -114,7 +114,7 @@ private:
 
   SolverMap resolutors_;
 
-  rclcpp::Service<plansys2_msgs::srv::GetSolve>::SharedPtr get_solve_service_;
+  rclcpp::Service<plansys2_solver_msgs::srv::GetSolve>::SharedPtr get_solve_service_;
   rclcpp::Subscription<plansys2_msgs::msg::ActionExecution>::SharedPtr action_subs_;
 
   plansys2_msgs::msg::ActionExecution::UniquePtr msg_;

@@ -13,6 +13,7 @@
   <depend>rclcpp_lifecycle</depend>
   <depend>ament_index_cpp</depend>
   <depend>plansys2_msgs</depend>
+  <depend>plansys2_solver_msgs</depend>
   <depend>pluginlib</depend>
   <depend>lifecycle_msgs</depend>
   <depend>plansys2_domain_expert</depend>

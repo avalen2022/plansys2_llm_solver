@@ -8,7 +8,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include "plansys2_msgs/msg/solver.hpp"
+#include "plansys2_solver_msgs/msg/solver.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 
@@ -29,7 +29,7 @@ public:
 
   virtual void initialize(const std::string & node_name) = 0;
 
-  virtual std::optional<plansys2_msgs::msg::Solver> solve(
+  virtual std::optional<plansys2_solver_msgs::msg::Solver> solve(
     const std::string & domain, const std::string & problem,
     const std::string & question,
     const std::string & action_file,
@@ -152,9 +152,9 @@ protected:
   // Parse raw LLM response into a populated Solver message.
   // Extracts JSON from wrapping text, populates classification + structured arrays.
   // On parse failure, returns msg with classification = MODIFY_PLAN.
-  static inline plansys2_msgs::msg::Solver parseResponse(const std::string & raw_response)
+  static inline plansys2_solver_msgs::msg::Solver parseResponse(const std::string & raw_response)
   {
-    plansys2_msgs::msg::Solver solution;
+    plansys2_solver_msgs::msg::Solver solution;
     solution.resolution = raw_response;
 
     try {
@@ -171,13 +171,13 @@ protected:
 
       std::string classification_str = j.value("classification", "MODIFY_PLAN");
       if (classification_str == "CORRECT") {
-        solution.classification = plansys2_msgs::msg::Solver::CORRECT;
+        solution.classification = plansys2_solver_msgs::msg::Solver::CORRECT;
       } else if (classification_str == "MODIFY_DOMAIN") {
-        solution.classification = plansys2_msgs::msg::Solver::MODIFY_DOMAIN;
+        solution.classification = plansys2_solver_msgs::msg::Solver::MODIFY_DOMAIN;
       } else if (classification_str == "UNSOLVABLE") {
-        solution.classification = plansys2_msgs::msg::Solver::UNSOLVABLE;
+        solution.classification = plansys2_solver_msgs::msg::Solver::UNSOLVABLE;
       } else {
-        solution.classification = plansys2_msgs::msg::Solver::MODIFY_PLAN;
+        solution.classification = plansys2_solver_msgs::msg::Solver::MODIFY_PLAN;
       }
 
       if (j.contains("remove_predicates")) {
@@ -201,7 +201,7 @@ protected:
         }
       }
     } catch (const nlohmann::json::exception &) {
-      solution.classification = plansys2_msgs::msg::Solver::MODIFY_PLAN;
+      solution.classification = plansys2_solver_msgs::msg::Solver::MODIFY_PLAN;
     }
 
     return solution;

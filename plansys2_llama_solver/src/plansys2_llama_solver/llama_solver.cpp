@@ -102,7 +102,7 @@ LLAMASolver::create_folders(const std::string & node_namespace)
   return output_path;
 }
 
-std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
+std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
   const std::string & domain, const std::string & problem,
   const std::string & question,
   const std::string & action_file,
