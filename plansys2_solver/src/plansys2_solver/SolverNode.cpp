@@ -1,6 +1,5 @@
 #include <string>
 #include <memory>
-#include <iostream>
 #include <fstream>
 
 #include "plansys2_solver/SolverNode.hpp"
@@ -33,10 +32,9 @@ SolverNode::~SolverNode()
   for (const auto & library : loaded_libraries) {
     try {
       lp_loader_.unloadLibraryForClass(library);
-      std::cout << "Successfully unloaded library: " << library << std::endl;
+      RCLCPP_DEBUG(get_logger(), "Unloaded library: %s", library.c_str());
     } catch (const pluginlib::LibraryUnloadException & e) {
-      std::cerr << "Failed to unload library: " << library <<
-        ". Error: " << e.what() << std::endl;
+      RCLCPP_WARN(get_logger(), "Failed to unload library %s: %s", library.c_str(), e.what());
     }
   }
 }
@@ -157,7 +155,7 @@ SolverNode::on_shutdown(const rclcpp_lifecycle::State & state)
 {
   (void) state;
   RCLCPP_INFO(this->get_logger(), "[%s] Shutting down...", get_name());
-  RCLCPP_INFO(this->get_logger(), "[%s] Shutted down", get_name());
+  RCLCPP_INFO(this->get_logger(), "[%s] Shut down", get_name());
 
   return CallbackReturnT::SUCCESS;
 }
@@ -204,7 +202,7 @@ void SolverNode::action_hub_callback(plansys2_msgs::msg::ActionExecution::Unique
 
     action_file_ << "-----------------------------\n\n";
   } else {
-    RCLCPP_WARN(this->get_logger(), "No se pudo abrir el archivo de log");
+    RCLCPP_WARN(this->get_logger(), "Failed to open action hub log file");
   }
 
   msg_ = std::move(msg);

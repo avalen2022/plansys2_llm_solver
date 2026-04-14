@@ -116,8 +116,6 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     return {};
   }
   const auto & output_dir = output_dir_maybe.value();
-  RCLCPP_DEBUG(
-    lc_node_->get_logger(), "Writing solver results on %s and domain/problem copies done.", output_dir.string().c_str());
 
   const auto domain_file_path = output_dir / std::filesystem::path("solver_domain.pddl");
   std::ofstream domain_out(domain_file_path);
@@ -141,11 +139,13 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   const auto args = lc_node_->get_parameter(arguments_parameter_name_).value_to_string();
   bool llm_debug = lc_node_->get_parameter(llm_debug_parameter_).as_bool();
   bool prompt_debug = lc_node_->get_parameter(prompt_debug_parameter_).as_bool();
+  std::string mode = lc_node_->get_parameter(summarize_mode_parameter_).as_string();
   auto logger = lc_node_->get_logger();
 
   RCLCPP_INFO(logger,
-    "[llama-solver] Starting solve (timeout=%.0fs, llm_debug=%s, prompt_debug=%s)",
+    "[llama-solver] Starting solve (timeout=%.0fs, summarize=%s, llm_debug=%s, prompt_debug=%s)",
     resolution_timeout.seconds(),
+    mode.c_str(),
     llm_debug ? "true" : "false",
     prompt_debug ? "true" : "false");
 
@@ -210,13 +210,8 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   }
 
   // Summarize the raw action hub into a compact log for the LLM.
-  std::string mode = lc_node_->get_parameter(summarize_mode_parameter_).as_string();
   bool limited = (mode != "full");
   std::string action_summary = summarizeActionLog(action_file, limited);
-
-  RCLCPP_INFO(logger,
-    "[llama-solver] Action log summarized: %zu chars (raw: %zu chars)",
-    action_summary.size(), action_file.size());
 
   // Build prompt
   std::string prompt_text = makePrompt(domain, problem, action_summary, question);
@@ -280,7 +275,7 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
 
 void LLAMASolver::initialize(const std::string & node_name)
 {
-  std::cout << "Inicializando solver con nodo: " << node_name << std::endl;
+  std::cout << "Initializing solver with node: " << node_name << std::endl;
 }
 }  // namespace plansys2
 

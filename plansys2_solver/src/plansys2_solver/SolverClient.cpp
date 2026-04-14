@@ -23,7 +23,7 @@ SolverClient::SolverClient()
 
   get_solve_client_ = node_->create_client<plansys2_msgs::srv::GetSolve>("solver/get_solve");
 
-  double timeout = 300;
+  double timeout = 240;
   node_->declare_parameter("solver_timeout", timeout);
 
   node_->get_parameter("solver_timeout", timeout);
@@ -51,10 +51,7 @@ SolverClient::getReplanificateSolve(
   }
   int32_t timeout = solver_timeout_.seconds();
   if (timeout <= 0) {
-    std::string timeout_str = "Get Solver service called with negative timed out:";
-    timeout_str += std::to_string(timeout);
-    timeout_str += ". Setting to 150 seconds";
-    RCLCPP_DEBUG(node_->get_logger(), timeout_str.c_str());
+    RCLCPP_WARN(node_->get_logger(), "Solver timeout was %d, falling back to 150s", timeout);
     timeout = 150;
   }
 
