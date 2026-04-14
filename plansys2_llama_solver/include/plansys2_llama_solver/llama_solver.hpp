@@ -69,12 +69,6 @@ public:
     const std::string & node_namespace = "",
     const rclcpp::Duration resolution_timeout = 15s) override;
 
-  // Summarize the raw action hub log into a compact format for the LLM.
-  // limited=true:  only FINISH/CANCEL entries (compact, fits small context windows)
-  // limited=false: all entries in compact one-line format (needs larger context)
-  static std::string summarize_action_log(
-    const std::string & raw_log, bool limited = true);
-
 private:
   std::string arguments_parameter_name_;
   std::string output_dir_parameter_name_;

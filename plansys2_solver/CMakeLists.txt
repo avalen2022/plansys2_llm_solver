@@ -16,6 +16,7 @@ find_package(plansys2_domain_expert REQUIRED)
 find_package(plansys2_problem_expert REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
+find_package(nlohmann_json REQUIRED)
 
 set(SOLVER_SOURCES
   src/plansys2_solver/SolverNode.cpp
@@ -36,6 +37,7 @@ target_link_libraries(${PROJECT_NAME}
   pluginlib::pluginlib
   rclcpp::rclcpp
   rclcpp_lifecycle::rclcpp_lifecycle
+  nlohmann_json::nlohmann_json
 )
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
@@ -112,6 +114,7 @@ ament_export_dependencies(
   plansys2_problem_expert
   pluginlib
   lifecycle_msgs
+  nlohmann_json
 )
 
 ament_package()

@@ -16,12 +16,9 @@
 #include <chrono>
 #include <fstream>
 #include <fcntl.h>
-#include <sstream>
 #include <thread>
 #include <sys/wait.h>
 #include <unistd.h>
-
-#include <nlohmann/json.hpp>
 
 #include "plansys2_llama_solver/llama_solver.hpp"
 #include "rclcpp/logging.hpp"
@@ -105,90 +102,6 @@ LLAMASolver::create_folders(const std::string & node_namespace)
   return output_path;
 }
 
-std::string LLAMASolver::summarize_action_log(
-  const std::string & raw_log, bool limited)
-{
-  // Parse the raw action hub log and produce a compact one-line-per-entry summary.
-  // Two modes controlled by limited:
-  //   true  (default) — only FINISH/CANCEL entries (compact, fits small context windows)
-  //   false ("full")  — all entries in compact format (needs larger context window)
-  // Type mapping: 1=REQUEST, 2=RESPONSE, 3=CONFIRM, 4=REJECT, 5=FEEDBACK, 6=FINISH, 7=CANCEL
-  static const char * type_names[] = {
-    "", "REQUEST", "RESPONSE", "CONFIRM", "REJECT", "FEEDBACK", "FINISH", "CANCEL"};
-
-  std::string summary;
-  std::istringstream stream(raw_log);
-  std::string line;
-
-  std::string current_action;
-  std::string current_args;
-  std::string current_status;
-  int current_type = 0;
-  bool current_success = false;
-  bool in_entry = false;
-  bool reading_args = false;
-
-  while (std::getline(stream, line)) {
-    if (line.find("----") == 0) {
-      if (in_entry && !current_action.empty()) {
-        bool keep = !limited ||
-          (current_type == 6 || current_type == 7);
-
-        if (keep) {
-          const char * tname = (current_type >= 1 && current_type <= 7)
-            ? type_names[current_type] : "UNKNOWN";
-          std::string result = current_success ? "SUCCESS" : "FAILED";
-
-          if (limited) {
-            // Compact: no type tag needed (all are FINISH/CANCEL)
-            summary += current_action + "(" + current_args + "): " + result;
-          } else {
-            summary += std::string("[") + tname + "] " +
-              current_action + "(" + current_args + "): " + result;
-          }
-          if (!current_status.empty()) {
-            summary += ". " + current_status;
-          }
-          summary += "\n";
-        }
-      }
-      in_entry = true;
-      current_action.clear();
-      current_args.clear();
-      current_status.clear();
-      current_type = 0;
-      current_success = false;
-      reading_args = false;
-      continue;
-    }
-
-    if (line.find("Action: ") == 0) {
-      current_action = line.substr(8);
-      reading_args = false;
-    } else if (line.find("Type: ") == 0) {
-      current_type = std::atoi(line.substr(6).c_str());
-    } else if (line.find("Arguments:") == 0) {
-      reading_args = true;
-    } else if (reading_args && line.find("  - ") == 0) {
-      if (!current_args.empty()) current_args += " ";
-      current_args += line.substr(4);
-    } else if (line.find("Success: ") == 0) {
-      current_success = (line.substr(9) == "true");
-      reading_args = false;
-    } else if (line.find("Status: ") == 0) {
-      current_status = line.substr(8);
-      reading_args = false;
-    } else {
-      reading_args = false;
-    }
-  }
-
-  if (summary.empty()) {
-    return "(no action log available)";
-  }
-  return summary;
-}
-
 std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   const std::string & domain, const std::string & problem,
   const std::string & question,
@@ -197,7 +110,6 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   const rclcpp::Duration resolution_timeout)
 {
   cancel_requested_ = false;
-  plansys2_msgs::msg::Solver solution;
 
   const auto output_dir_maybe = create_folders(node_namespace);
   if (!output_dir_maybe) {
@@ -300,34 +212,14 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
   // Summarize the raw action hub into a compact log for the LLM.
   std::string mode = lc_node_->get_parameter(summarize_mode_parameter_).as_string();
   bool limited = (mode != "full");
-  std::string action_summary = summarize_action_log(action_file, limited);
+  std::string action_summary = summarizeActionLog(action_file, limited);
 
   RCLCPP_INFO(logger,
     "[llama-solver] Action log summarized: %zu chars (raw: %zu chars)",
     action_summary.size(), action_file.size());
 
   // Build prompt
-  std::string prompt_text =
-    "You are a PDDL state update assistant. Given a PDDL domain, problem state, "
-    "action execution log, and an observation, determine what state changes are needed.\n\n"
-    "RULES:\n"
-    "- Only change predicates directly affected by the observation\n"
-    "- Do NOT change predicates for objects not mentioned\n"
-    "- If an object moved from A to B: remove (object_at obj A), add (object_at obj B)\n"
-    "- If no changes are needed, classify as CORRECT\n\n"
-    "--- Domain ---\n" + domain + "\n\n"
-    "--- Problem ---\n" + problem + "\n\n"
-    "--- Action execution log ---\n" + action_summary + "\n\n"
-    "--- Observation ---\n" + question + "\n\n"
-    "Reply ONLY with a JSON object in this exact format:\n"
-    "{\n"
-    "  \"classification\": \"MODIFY_PLAN\" or \"CORRECT\" or \"UNSOLVABLE\",\n"
-    "  \"reasoning\": \"brief explanation\",\n"
-    "  \"remove_predicates\": [\"(predicate1)\", \"(predicate2)\"],\n"
-    "  \"add_predicates\": [\"(predicate1)\", \"(predicate2)\"],\n"
-    "  \"add_instances\": [],\n"
-    "  \"domain_changes\": []\n"
-    "}";
+  std::string prompt_text = makePrompt(domain, problem, action_summary, question);
 
   if (prompt_debug) {
     RCLCPP_INFO(logger, "[llama-prompt] Sending prompt (%zu chars):\n%s",
@@ -381,36 +273,8 @@ std::optional<plansys2_msgs::msg::Solver> LLAMASolver::solve(
     launch_drain.join();
   }
 
-  solution.resolution = raw_response;
-
-  // Parse classification from JSON to set modifier_flag correctly
-  try {
-    // Extract JSON from response (handles LLM wrapping with extra text)
-    std::string json_str = raw_response;
-    auto json_start = raw_response.find('{');
-    auto json_end = raw_response.rfind('}');
-    if (json_start != std::string::npos && json_end != std::string::npos && json_end > json_start) {
-      json_str = raw_response.substr(json_start, json_end - json_start + 1);
-    }
-
-    auto j = nlohmann::json::parse(json_str);
-    std::string classification = j.value("classification", "MODIFY_PLAN");
-    solution.modifier_flag = (classification != "CORRECT");
-
-    std::string reasoning = j.value("reasoning", "");
-    RCLCPP_INFO(lc_node_->get_logger(),
-      "[llama-solver] Classification: %s | modifier_flag: %s | Reasoning: %s",
-      classification.c_str(),
-      solution.modifier_flag ? "true" : "false",
-      reasoning.c_str());
-  } catch (const nlohmann::json::exception & e) {
-    // JSON parse failed — fallback to assuming changes are needed
-    RCLCPP_WARN(lc_node_->get_logger(),
-      "[%s-llama] Failed to parse JSON classification, defaulting to modifier_flag=true: %s",
-      lc_node_->get_name(), e.what());
-    solution.modifier_flag = true;
-  }
-
+  auto solution = parseResponse(raw_response);
+  solution.time = static_cast<float>(elapsed_ms) / 1000.0f;
   return solution;
 }
 
