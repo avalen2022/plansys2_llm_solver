@@ -25,7 +25,21 @@ public:
   virtual ~SolverBase() {}
 
   virtual void configure(
-    rclcpp_lifecycle::LifecycleNode::SharedPtr lc_node, const std::string & plugin_name) = 0;
+    rclcpp_lifecycle::LifecycleNode::SharedPtr lc_node, const std::string & plugin_name)
+  {
+    (void)plugin_name;
+    lc_node_ = lc_node;
+
+    if (!lc_node_->has_parameter("summarize_mode")) {
+      lc_node_->declare_parameter<std::string>("summarize_mode", "limited");
+    }
+    lc_node_->get_parameter("summarize_mode", summarize_mode_);
+
+    if (!lc_node_->has_parameter("prompt_debug")) {
+      lc_node_->declare_parameter<bool>("prompt_debug", false);
+    }
+    lc_node_->get_parameter("prompt_debug", prompt_debug_);
+  }
 
   virtual void initialize(const std::string & node_name) = 0;
 
@@ -211,6 +225,12 @@ protected:
   rclcpp_lifecycle::LifecycleNode::SharedPtr lc_node_;
   // Flag indicating if cancellation was requested.
   bool cancel_requested_;
+
+  // Generic solver parameters (read by base configure).
+  // "limited" = only FINISH/CANCEL entries; "full" = all entries
+  std::string summarize_mode_{"limited"};
+  // Log the full prompt and response
+  bool prompt_debug_{false};
 };
 
 }  // namespace plansys2

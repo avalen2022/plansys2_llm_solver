@@ -14,11 +14,13 @@ planner:
 solver:
   ros__parameters:
     solver_timeout: 240.0
+    summarize_mode: "limited"
+    prompt_debug: false
     solver_plugins: ["LLAMA"]
-    LLAMA.llm_debug: true
-    LLAMA.model_yaml: "~/TFG/src/llama_ros/llama_bringup/models/Phi-4.yaml"
     LLAMA:
       plugin: "plansys2/LLAMASolver"
+      llm_debug: true
+      model_yaml: "~/TFG/src/llm/llama_ros/llama_bringup/models/Phi-4.yaml"
 executor:
   ros__parameters:
     bt_builder_plugin: "SimpleBTBuilder"

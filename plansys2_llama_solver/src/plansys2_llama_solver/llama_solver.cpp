@@ -34,12 +34,13 @@ void LLAMASolver::configure(
   rclcpp_lifecycle::LifecycleNode::SharedPtr lc_node,
   const std::string & plugin_name)
 {
-  lc_node_ = lc_node;
+  // Generic params (summarize_mode, prompt_debug) read by base class.
+  SolverBase::configure(lc_node, plugin_name);
 
+  // Plugin-specific params (namespaced under plugin name).
   arguments_parameter_name_ = plugin_name + ".arguments";
   output_dir_parameter_name_ = plugin_name + ".output_dir";
   llm_debug_parameter_ = plugin_name + ".llm_debug";
-  summarize_mode_parameter_ = plugin_name + ".summarize_mode";
 
   if (!lc_node_->has_parameter(arguments_parameter_name_)) {
     lc_node_->declare_parameter<std::string>(arguments_parameter_name_, "");
@@ -50,15 +51,6 @@ void LLAMASolver::configure(
   }
   if (!lc_node_->has_parameter(llm_debug_parameter_)) {
     lc_node_->declare_parameter<bool>(llm_debug_parameter_, false);
-  }
-  prompt_debug_parameter_ = plugin_name + ".prompt_debug";
-  if (!lc_node_->has_parameter(prompt_debug_parameter_)) {
-    lc_node_->declare_parameter<bool>(prompt_debug_parameter_, false);
-  }
-  if (!lc_node_->has_parameter(summarize_mode_parameter_)) {
-    // "limited" = only FINISH/CANCEL entries (compact, fits small context windows)
-    // "full" = all entries in compact one-line format (needs larger context window)
-    lc_node_->declare_parameter<std::string>(summarize_mode_parameter_, "limited");
   }
 
   model_yaml_parameter_name_ = plugin_name + ".model_yaml";
@@ -138,16 +130,14 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
 
   const auto args = lc_node_->get_parameter(arguments_parameter_name_).value_to_string();
   bool llm_debug = lc_node_->get_parameter(llm_debug_parameter_).as_bool();
-  bool prompt_debug = lc_node_->get_parameter(prompt_debug_parameter_).as_bool();
-  std::string mode = lc_node_->get_parameter(summarize_mode_parameter_).as_string();
   auto logger = lc_node_->get_logger();
 
   RCLCPP_INFO(logger,
     "[llama-solver] Starting solve (timeout=%.0fs, summarize=%s, llm_debug=%s, prompt_debug=%s)",
     resolution_timeout.seconds(),
-    mode.c_str(),
+    summarize_mode_.c_str(),
     llm_debug ? "true" : "false",
-    prompt_debug ? "true" : "false");
+    prompt_debug_ ? "true" : "false");
 
   // --- Fork: launch LLM server ---
   int launch_pipe[2] = {-1, -1};
@@ -210,13 +200,13 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
   }
 
   // Summarize the raw action hub into a compact log for the LLM.
-  bool limited = (mode != "full");
+  bool limited = (summarize_mode_ != "full");
   std::string action_summary = summarizeActionLog(action_file, limited);
 
   // Build prompt
   std::string prompt_text = makePrompt(domain, problem, action_summary, question);
 
-  if (prompt_debug) {
+  if (prompt_debug_) {
     RCLCPP_INFO(logger, "[llama-prompt] Sending prompt (%zu chars):\n%s",
       prompt_text.size(), prompt_text.c_str());
   }
@@ -247,7 +237,7 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
     buf[n] = '\0';
     resolution_out.write(buf, n);
     raw_response.append(buf, n);
-    if (prompt_debug) {
+    if (prompt_debug_) {
       RCLCPP_INFO(logger, "[llama-response] %s", buf);
     }
   }
