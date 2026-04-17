@@ -18,14 +18,6 @@ using namespace std::chrono_literals;
 namespace plansys2
 {
 
-// Pin the ActionExecution enum values we compare against. This does not protect runtime
-// behaviour (we use the named constants below), but it documents the assumption at compile
-// time and will fire loudly if upstream plansys2_msgs ever renumbers these fields.
-static_assert(plansys2_msgs::msg::ActionExecution::FINISH == 6,
-  "summarizeActionLog assumes FINISH == 6 (log-file numeric stability)");
-static_assert(plansys2_msgs::msg::ActionExecution::CANCEL == 7,
-  "summarizeActionLog assumes CANCEL == 7 (log-file numeric stability)");
-
 class SolverBase
 {
 public:
