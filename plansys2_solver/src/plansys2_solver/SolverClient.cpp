@@ -1,4 +1,4 @@
-// Copyright 2019 Intelligent Robotics Lab
+// Copyright 2026 Intelligent Robotics Lab
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ SolverClient::SolverClient()
 std::optional<plansys2_solver_msgs::msg::Solver>
 SolverClient::getReplanificateSolve(
   const std::string & domain, const std::string & problem,
-  const std::string & prompt,
+  const std::string & observation,
   const std::string & node_namespace)
 {
   (void)node_namespace;
@@ -60,7 +60,7 @@ SolverClient::getReplanificateSolve(
   auto request = std::make_shared<plansys2_solver_msgs::srv::GetSolve::Request>();
   request->domain = domain;
   request->problem = problem;
-  request->question = prompt;
+  request->observation = observation;
 
   auto future_result = get_solve_client_->async_send_request(request);
 
@@ -93,12 +93,12 @@ std::optional<plansys2_solver_msgs::msg::SolverArray>
 plansys2::SolverClient::getReplanificateSolveArray(
     const std::string & domain,
     const std::string & problem,
-    const std::string & prompt,
+    const std::string & observation,
     const std::string & node_namespace)
 {
     (void) domain;
     (void) problem;
-    (void) prompt;
+    (void) observation;
     (void) node_namespace;
     return {};
 }

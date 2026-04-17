@@ -22,13 +22,13 @@ public:
 
     std::optional<plansys2_solver_msgs::msg::Solver> getReplanificateSolve(
         const std::string & domain, const std::string & problem,
-        const std::string & prompt,
+        const std::string & observation,
         const std::string & node_namespace = "");
 
 
     std::optional<plansys2_solver_msgs::msg::SolverArray> getReplanificateSolveArray(
         const std::string & domain, const std::string & problem,
-        const std::string & prompt,
+        const std::string & observation,
         const std::string & node_namespace = "");
 
 private:

@@ -13,25 +13,25 @@ namespace plansys2
 
 SolverNode::SolverNode()
 : rclcpp_lifecycle::LifecycleNode("solver"),
-  lp_loader_("plansys2_solver", "plansys2::SolverBase"),
+  plugin_loader_("plansys2_solver", "plansys2::SolverBase"),
   default_ids_{},
   default_types_{},
-  resolution_timeout_(120s)
+  solve_timeout_(120s)
 {
   declare_parameter("solver_plugins", default_ids_);
-  double timeout = resolution_timeout_.seconds();
+  double timeout = solve_timeout_.seconds();
   declare_parameter("solver_timeout", timeout);
 }
 
 SolverNode::~SolverNode()
 {
-  resolutors_.clear();
+  solvers_.clear();
 
-  std::vector<std::string> loaded_libraries = lp_loader_.getRegisteredLibraries();
+  std::vector<std::string> loaded_libraries = plugin_loader_.getRegisteredLibraries();
 
   for (const auto & library : loaded_libraries) {
     try {
-      lp_loader_.unloadLibraryForClass(library);
+      plugin_loader_.unloadLibraryForClass(library);
       RCLCPP_DEBUG(get_logger(), "Unloaded library: %s", library.c_str());
     } catch (const pluginlib::LibraryUnloadException & e) {
       RCLCPP_WARN(get_logger(), "Failed to unload library %s: %s", library.c_str(), e.what());
@@ -71,7 +71,7 @@ SolverNode::on_configure(const rclcpp_lifecycle::State & state)
   action_file_.close();
 
 
-  resolution_timeout_ = rclcpp::Duration((int32_t)timeout, 0);
+  solve_timeout_ = rclcpp::Duration((int32_t)timeout, 0);
 
   if (!workers_ids_.empty()) {
     if (workers_ids_ == default_ids_) {
@@ -87,14 +87,14 @@ SolverNode::on_configure(const rclcpp_lifecycle::State & state)
       try {
         worker_types_[i] = plansys2::get_plugin_type_param(node, workers_ids_[i]);
         plansys2::SolverBase::Ptr solver =
-        lp_loader_.createUniqueInstance(worker_types_[i]);
+        plugin_loader_.createUniqueInstance(worker_types_[i]);
 
         solver->configure(node, workers_ids_[i]);
 
         RCLCPP_INFO(
         this->get_logger(), "Created solver : %s of type %s",
         workers_ids_[i].c_str(), worker_types_[i].c_str());
-        resolutors_.insert({workers_ids_[i], solver});
+        solvers_.insert({workers_ids_[i], solver});
       } catch (const pluginlib::PluginlibException & ex) {
         RCLCPP_FATAL(this->get_logger(), "Failed to create solver. Exception: %s", ex.what());
         exit(-1);
@@ -105,7 +105,7 @@ SolverNode::on_configure(const rclcpp_lifecycle::State & state)
     return CallbackReturnT::FAILURE;
   }
 
-  RCLCPP_INFO(this->get_logger(), "[%s] Solver Timeout %g", get_name(), resolution_timeout_.seconds());
+  RCLCPP_INFO(this->get_logger(), "[%s] Solver Timeout %g", get_name(), solve_timeout_.seconds());
 
   get_solve_service_ = create_service<plansys2_solver_msgs::srv::GetSolve>(
     "solver/get_solve",
@@ -171,15 +171,15 @@ SolverNode::on_error(const rclcpp_lifecycle::State & state)
 
 void SolverNode::action_hub_callback(plansys2_msgs::msg::ActionExecution::UniquePtr msg)
 {
-  // Deduplicate by comparing content fields, not pointers.
-  // Skip if same action, type, status, success AND completion hasn't changed
-  // significantly (within 0.30 threshold — avoids logging every small progress tick).
-  if (msg_ != nullptr &&
-      msg->action == msg_->action &&
-      msg->type == msg_->type &&
-      msg->status == msg_->status &&
-      msg->success == msg_->success &&
-      std::abs(msg->completion - msg_->completion) < 0.30f)
+  // Deduplicate against the previous message: skip if the same action/type/status/success
+  // and completion has not advanced by at least 0.30 — avoids flooding the log with
+  // near-identical FEEDBACK ticks while still capturing meaningful progress.
+  if (previous_action_msg_ != nullptr &&
+      msg->action == previous_action_msg_->action &&
+      msg->type == previous_action_msg_->type &&
+      msg->status == previous_action_msg_->status &&
+      msg->success == previous_action_msg_->success &&
+      std::abs(msg->completion - previous_action_msg_->completion) < 0.30f)
   {
     return;
   }
@@ -205,7 +205,7 @@ void SolverNode::action_hub_callback(plansys2_msgs::msg::ActionExecution::Unique
     RCLCPP_WARN(this->get_logger(), "Failed to open action hub log file");
   }
 
-  msg_ = std::move(msg);
+  previous_action_msg_ = std::move(msg);
 }
 
 void
@@ -216,7 +216,7 @@ SolverNode::get_solve_service_callback(
 {
   (void) request_header;
   std::string action_file = read_file(action_file_path_);
-  auto solves = get_solve_array(request->domain, request->problem, request->question, action_file);
+  auto solves = get_solve_array(request->domain, request->problem, request->observation, action_file);
 
   if (!solves.solver_array.empty()) {
     response->status = plansys2_solver_msgs::srv::GetSolve::Response::SUCCESS;
@@ -228,21 +228,21 @@ SolverNode::get_solve_service_callback(
 }
 
 plansys2_solver_msgs::msg::SolverArray
-SolverNode::get_solve_array(const std::string & domain, const std::string & problem, const std::string & question, const std::string action_file)
+SolverNode::get_solve_array(const std::string & domain, const std::string & problem, const std::string & observation, const std::string & action_file)
 {
   std::map<std::string, std::future<std::optional<plansys2_solver_msgs::msg::Solver>>> futures;
   std::map<std::string, std::optional<plansys2_solver_msgs::msg::Solver>> results;
 
-  for (auto & resol : resolutors_) {
-    futures[resol.first] = std::async(std::launch::async,
-      &plansys2::SolverBase::solve, resol.second,
-      domain, problem, question, action_file, get_namespace(), resolution_timeout_);
+  for (auto & [solver_id, solver] : solvers_) {
+    futures[solver_id] = std::async(std::launch::async,
+      &plansys2::SolverBase::solve, solver,
+      domain, problem, observation, action_file, get_namespace(), solve_timeout_);
   }
 
   auto start = now();
 
-  size_t pending_result = resolutors_.size();
-  while (pending_result > 0 && now() - start < resolution_timeout_) {
+  size_t pending_result = solvers_.size();
+  while (pending_result > 0 && now() - start < solve_timeout_) {
     for (auto & fut : futures) {
       if (results.find(fut.first) == results.end()) {
         if (fut.second.wait_for(1ms) == std::future_status::ready) {
@@ -253,11 +253,14 @@ SolverNode::get_solve_array(const std::string & domain, const std::string & prob
     }
   }
 
-  for (auto & resol : resolutors_) {
-    if (results.find(resol.first) == results.end()) {
-      resol.second->cancel();
+  for (auto & [solver_id, solver] : solvers_) {
+    if (results.find(solver_id) == results.end()) {
+      solver->cancel();
     }
   }
+  // Give cancelled solvers a short window to observe cancel_requested_ and return
+  // before we block on their futures below. 100 ms is a safety margin over the
+  // typical cancel-observation latency in SolverBase::cancel().
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   for (auto & fut : futures) {

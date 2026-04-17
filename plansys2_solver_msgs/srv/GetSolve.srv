@@ -1,6 +1,6 @@
 string domain
 string problem
-string question
+string observation
 ---
 # Status type
 uint8 ERROR=0

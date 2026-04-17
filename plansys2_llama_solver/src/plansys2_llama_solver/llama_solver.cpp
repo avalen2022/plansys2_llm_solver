@@ -1,4 +1,4 @@
-// Copyright 2019 Intelligent Robotics Lab
+// Copyright 2026 Intelligent Robotics Lab
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -96,10 +96,10 @@ LLAMASolver::create_folders(const std::string & node_namespace)
 
 std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
   const std::string & domain, const std::string & problem,
-  const std::string & question,
+  const std::string & observation,
   const std::string & action_file,
   const std::string & node_namespace,
-  const rclcpp::Duration resolution_timeout)
+  const rclcpp::Duration solve_timeout)
 {
   cancel_requested_ = false;
 
@@ -119,10 +119,10 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
   problem_out << problem;
   problem_out.close();
 
-  const auto question_file_path = output_dir / std::filesystem::path("solver_question.pddl");
-  std::ofstream question_out(question_file_path);
-  question_out << question;
-  question_out.close();
+  const auto observation_file_path = output_dir / std::filesystem::path("solver_observation.pddl");
+  std::ofstream observation_out(observation_file_path);
+  observation_out << observation;
+  observation_out.close();
 
 
   const auto resolution_file_path = output_dir / std::filesystem::path("solver_resolution.txt");
@@ -134,7 +134,7 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
 
   RCLCPP_INFO(logger,
     "[llama-solver] Starting solve (timeout=%.0fs, summarize=%s, llm_debug=%s, prompt_debug=%s)",
-    resolution_timeout.seconds(),
+    solve_timeout.seconds(),
     summarize_mode_.c_str(),
     llm_debug ? "true" : "false",
     prompt_debug_ ? "true" : "false");
@@ -204,7 +204,7 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
   std::string action_summary = summarizeActionLog(action_file, limited);
 
   // Build prompt
-  std::string prompt_text = makePrompt(domain, problem, action_summary, question);
+  std::string prompt_text = makePrompt(domain, problem, action_summary, observation);
 
   if (prompt_debug_) {
     RCLCPP_INFO(logger, "[llama-prompt] Sending prompt (%zu chars):\n%s",

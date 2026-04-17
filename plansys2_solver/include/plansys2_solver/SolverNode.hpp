@@ -26,12 +26,12 @@ class SolverNode : public rclcpp_lifecycle::LifecycleNode
 {
 public:
   /**
-   * @brief Constructor for the PlannerNode.
+   * @brief Constructor for the SolverNode.
    */
   SolverNode();
 
   /**
-   * @brief Destructor for the PlannerNode.
+   * @brief Destructor for the SolverNode. Unloads all pluginlib-loaded solvers.
    */
   ~SolverNode();
 
@@ -88,36 +88,58 @@ public:
   CallbackReturnT on_error(const rclcpp_lifecycle::State & state);
 
   /**
-   * @brief Service callback to generate a plan for a PDDL problem.
+   * @brief Service callback that runs the configured solver plugins over the current PDDL
+   *        domain, problem and observation, returning a Solver message with the requested
+   *        state-delta (add/remove predicates) plus a classification.
    *
    * @param[in] request_header ROS service request header.
-   * @param[in] request Service request containing domain and problem PDDL strings.
-   * @param[out] response Service response containing the generated plan and success status.
+   * @param[in] request Service request with domain, problem and observation strings.
+   * @param[out] response Service response with the Solver message and status.
    */
   void get_solve_service_callback(
     const std::shared_ptr<rmw_request_id_t> request_header,
     const std::shared_ptr<plansys2_solver_msgs::srv::GetSolve::Request> request,
     const std::shared_ptr<plansys2_solver_msgs::srv::GetSolve::Response> response);
 
+  /**
+   * @brief Runs every loaded solver plugin in parallel (std::async) and collects their
+   *        results, honouring the configured solve_timeout. Plugins that do not finish
+   *        in time are asked to cancel() and their futures are drained before return.
+   *
+   * @param[in] domain PDDL domain text.
+   * @param[in] problem PDDL problem text.
+   * @param[in] observation Short natural-language description of what triggered the solve.
+   * @param[in] action_file Content of the action-hub log file (produced by action_hub_callback).
+   * @return SolverArray with one Solver entry per plugin that produced a result.
+   */
   plansys2_solver_msgs::msg::SolverArray get_solve_array(
-    const std::string & domain, const std::string & problem, const std::string & question, std::string action_file);
+    const std::string & domain, const std::string & problem, const std::string & observation, const std::string & action_file);
 
+  /**
+   * @brief Subscription callback for /actions_hub. Appends a structured entry to the
+   *        action-hub log file with per-action metadata (type, args, success, completion,
+   *        status). Deduplicates against the previous message to avoid flooding the log
+   *        with near-identical feedback ticks.
+   *
+   * @param[in] msg Incoming ActionExecution message. Ownership is taken: after the
+   *                dedup check the message is moved into previous_action_msg_.
+   */
   void action_hub_callback(plansys2_msgs::msg::ActionExecution::UniquePtr msg);
 
 private:
-  pluginlib::ClassLoader<plansys2::SolverBase> lp_loader_;
+  pluginlib::ClassLoader<plansys2::SolverBase> plugin_loader_;
   std::vector<std::string> default_ids_;
   std::vector<std::string> default_types_;
   std::vector<std::string> workers_ids_;
   std::vector<std::string> worker_types_;
-  rclcpp::Duration resolution_timeout_;
+  rclcpp::Duration solve_timeout_;
 
-  SolverMap resolutors_;
+  SolverMap solvers_;
 
   rclcpp::Service<plansys2_solver_msgs::srv::GetSolve>::SharedPtr get_solve_service_;
   rclcpp::Subscription<plansys2_msgs::msg::ActionExecution>::SharedPtr action_subs_;
 
-  plansys2_msgs::msg::ActionExecution::UniquePtr msg_;
+  plansys2_msgs::msg::ActionExecution::UniquePtr previous_action_msg_;
   std::string action_file_path_;
 };
 

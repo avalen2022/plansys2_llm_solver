@@ -8,6 +8,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "plansys2_msgs/msg/action_execution.hpp"
 #include "plansys2_solver_msgs/msg/solver.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -16,6 +17,14 @@ using namespace std::chrono_literals;
 
 namespace plansys2
 {
+
+// Pin the ActionExecution enum values we compare against. This does not protect runtime
+// behaviour (we use the named constants below), but it documents the assumption at compile
+// time and will fire loudly if upstream plansys2_msgs ever renumbers these fields.
+static_assert(plansys2_msgs::msg::ActionExecution::FINISH == 6,
+  "summarizeActionLog assumes FINISH == 6 (log-file numeric stability)");
+static_assert(plansys2_msgs::msg::ActionExecution::CANCEL == 7,
+  "summarizeActionLog assumes CANCEL == 7 (log-file numeric stability)");
 
 class SolverBase
 {
@@ -45,21 +54,39 @@ public:
 
   virtual std::optional<plansys2_solver_msgs::msg::Solver> solve(
     const std::string & domain, const std::string & problem,
-    const std::string & question,
+    const std::string & observation,
     const std::string & action_file,
     const std::string & node_namespace = "",
-    const rclcpp::Duration resolution_timeout = 120s) = 0;
+    const rclcpp::Duration solve_timeout = 120s) = 0;
 
   virtual void cancel() {cancel_requested_ = true;}
 
 protected:
-  // Summarize the raw action hub log into a compact format for the LLM.
-  // limited=true: only FINISH/CANCEL entries; limited=false: all entries
+  // Map an ActionExecution::type value to its printable name. Anything outside the known
+  // enum range is reported as UNKNOWN instead of indexing a lookup table blindly.
+  static inline const char * actionTypeName(int16_t type)
+  {
+    using plansys2_msgs::msg::ActionExecution;
+    switch (type) {
+      case ActionExecution::REQUEST:  return "REQUEST";
+      case ActionExecution::RESPONSE: return "RESPONSE";
+      case ActionExecution::CONFIRM:  return "CONFIRM";
+      case ActionExecution::REJECT:   return "REJECT";
+      case ActionExecution::FEEDBACK: return "FEEDBACK";
+      case ActionExecution::FINISH:   return "FINISH";
+      case ActionExecution::CANCEL:   return "CANCEL";
+      default:                        return "UNKNOWN";
+    }
+  }
+
+  // Parse the action-hub log (written by SolverNode::action_hub_callback, which uses a
+  // "-----" separator and "Field: value" lines) and build a compact text summary the LLM
+  // can consume. When `limited` is true (default) only FINISH/CANCEL entries are kept —
+  // enough to know which action closed and how — dropping the chatty REQUEST/RESPONSE/
+  // CONFIRM/REJECT/FEEDBACK traffic that bloats the prompt.
   static inline std::string summarizeActionLog(const std::string & raw_log, bool limited = true)
   {
-    // Type mapping: 1=REQUEST, 2=RESPONSE, 3=CONFIRM, 4=REJECT, 5=FEEDBACK, 6=FINISH, 7=CANCEL
-    static const char * type_names[] = {
-      "", "REQUEST", "RESPONSE", "CONFIRM", "REJECT", "FEEDBACK", "FINISH", "CANCEL"};
+    using plansys2_msgs::msg::ActionExecution;
 
     std::string summary;
     std::istringstream stream(raw_log);
@@ -77,11 +104,11 @@ protected:
       if (line.find("----") == 0) {
         if (in_entry && !current_action.empty()) {
           bool keep = !limited ||
-            (current_type == 6 || current_type == 7);
+            (current_type == ActionExecution::FINISH ||
+             current_type == ActionExecution::CANCEL);
 
           if (keep) {
-            const char * tname = (current_type >= 1 && current_type <= 7)
-              ? type_names[current_type] : "UNKNOWN";
+            const char * tname = actionTypeName(current_type);
             std::string result = current_success ? "SUCCESS" : "FAILED";
 
             if (limited) {
@@ -138,7 +165,7 @@ protected:
     const std::string & domain,
     const std::string & problem,
     const std::string & action_summary,
-    const std::string & question)
+    const std::string & observation)
   {
     return
       "You are a PDDL state update assistant. Given a PDDL domain, problem state, "
@@ -151,7 +178,7 @@ protected:
       "--- Domain ---\n" + domain + "\n\n"
       "--- Problem ---\n" + problem + "\n\n"
       "--- Action execution log ---\n" + action_summary + "\n\n"
-      "--- Observation ---\n" + question + "\n\n"
+      "--- Observation ---\n" + observation + "\n\n"
       "Reply ONLY with a JSON object in this exact format:\n"
       "{\n"
       "  \"classification\": \"MODIFY_PLAN\" or \"CORRECT\" or \"UNSOLVABLE\",\n"

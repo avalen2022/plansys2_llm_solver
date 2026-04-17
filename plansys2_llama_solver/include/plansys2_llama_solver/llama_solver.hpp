@@ -1,4 +1,4 @@
-// Copyright 2019 Intelligent Robotics Lab
+// Copyright 2026 Intelligent Robotics Lab
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,19 +22,22 @@
 
 #include "plansys2_solver/SolverBase.hpp"
 
-// using namespace std::chrono_literals;
 using std::chrono_literals::operator""s;
 
 namespace plansys2
 {
 
 /**
- * @class plansys2::POPFPlanSolver
- * @brief Plan solver implementation that uses the POPF planning system.
+ * @class plansys2::LLAMASolver
+ * @brief Solver plugin that uses a local LLM (via llama_ros) as a reasoner over PDDL state.
  *
- * This class implements the PlanSolverBase interface using the POPF (Partial Order Planning Forward)
- * planner. It handles writing domain and problem files to disk, executing the planner,
- * and parsing the resulting plan.
+ * Implements the SolverBase interface. On each solve() call it writes the current
+ * domain, problem, and observation to disk, spawns the llama_ros model server and a
+ * prompt process (fork+exec on `ros2 llama`), captures the JSON reply and fills a
+ * plansys2_solver_msgs::msg::Solver with the classification (CORRECT / MODIFY_PLAN /
+ * MODIFY_DOMAIN / UNSOLVABLE) and the predicate add/remove lists. The fork+exec design
+ * is deliberate so the same plugin shape can wrap other backends (local models, paid APIs)
+ * without pulling their SDKs into the solver process.
  */
 class LLAMASolver : public SolverBase
 {
@@ -64,10 +67,10 @@ public:
 
   virtual std::optional<plansys2_solver_msgs::msg::Solver> solve(
     const std::string & domain, const std::string & problem,
-    const std::string & question,
+    const std::string & observation,
     const std::string & action_file,
     const std::string & node_namespace = "",
-    const rclcpp::Duration resolution_timeout = 15s) override;
+    const rclcpp::Duration solve_timeout = 15s) override;
 
 private:
   std::string arguments_parameter_name_;
