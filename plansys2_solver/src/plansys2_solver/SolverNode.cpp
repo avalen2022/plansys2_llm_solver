@@ -219,8 +219,14 @@ SolverNode::get_solve_service_callback(
   auto solves = get_solve_array(request->domain, request->problem, request->observation, action_file);
 
   if (!solves.solver_array.empty()) {
-    response->status = plansys2_solver_msgs::srv::GetSolve::Response::SUCCESS;
-    response->solver = solves.solver_array.front();
+    const auto & first = solves.solver_array.front();
+    response->solver = first;
+    if (first.classification == plansys2_solver_msgs::msg::Solver::ERROR) {
+      response->status = plansys2_solver_msgs::srv::GetSolve::Response::ERROR;
+      response->error_info = "Solver returned ERROR classification (LLM output unparseable)";
+    } else {
+      response->status = plansys2_solver_msgs::srv::GetSolve::Response::SUCCESS;
+    }
   } else {
     response->status = plansys2_solver_msgs::srv::GetSolve::Response::ERROR;
     response->error_info = "Resolution not found";

@@ -79,6 +79,15 @@ SolverClient::getReplanificateSolve(
   auto result = *future_result.get();
 
   if (result.status == plansys2_solver_msgs::srv::GetSolve::Response::SUCCESS) {
+    // Defensive: SolverNode should have already mapped ERROR classification to
+    // response->status = ERROR, but double-check here so the client surface is
+    // uniform — any ERROR means the downstream sees std::nullopt.
+    if (result.solver.classification == plansys2_solver_msgs::msg::Solver::ERROR) {
+      RCLCPP_ERROR(
+        node_->get_logger(),
+        "Solver returned ERROR classification (LLM output unparseable)");
+      return {};
+    }
     return result.solver;
   } else {
     RCLCPP_ERROR_STREAM(

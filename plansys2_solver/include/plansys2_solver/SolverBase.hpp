@@ -191,58 +191,82 @@ protected:
   }
 
   // Parse raw LLM response into a populated Solver message.
-  // Extracts JSON from wrapping text, populates classification + structured arrays.
-  // On parse failure, returns msg with classification = MODIFY_PLAN.
+  // Extracts the JSON object from wrapping text, validates the required shape, and
+  // fills the classification + structured arrays. Any failure (empty response, no JSON
+  // object found, parse error, not-an-object, missing classification field, unknown
+  // classification value, type mismatches) yields classification = ERROR so the caller
+  // can tell "LLM didn't answer" apart from "LLM asked for a replan".
   static inline plansys2_solver_msgs::msg::Solver parseResponse(const std::string & raw_response)
   {
     plansys2_solver_msgs::msg::Solver solution;
     solution.resolution = raw_response;
+    // Default to ERROR; only overwrite once all shape checks pass.
+    solution.classification = plansys2_solver_msgs::msg::Solver::ERROR;
+
+    if (raw_response.empty()) {
+      return solution;
+    }
+
+    // Extract the JSON object substring. LLMs occasionally wrap JSON in commentary;
+    // we take the outermost {...} and discard anything around it.
+    const auto json_start = raw_response.find('{');
+    const auto json_end = raw_response.rfind('}');
+    if (json_start == std::string::npos || json_end == std::string::npos ||
+      json_end <= json_start)
+    {
+      return solution;
+    }
+    const std::string json_str = raw_response.substr(json_start, json_end - json_start + 1);
 
     try {
-      std::string json_str = raw_response;
-      auto json_start = raw_response.find('{');
-      auto json_end = raw_response.rfind('}');
-      if (json_start != std::string::npos && json_end != std::string::npos &&
-        json_end > json_start)
+      auto j = nlohmann::json::parse(json_str);
+      if (!j.is_object() || !j.contains("classification") ||
+        !j["classification"].is_string())
       {
-        json_str = raw_response.substr(json_start, json_end - json_start + 1);
+        return solution;
       }
 
-      auto j = nlohmann::json::parse(json_str);
-
-      std::string classification_str = j.value("classification", "MODIFY_PLAN");
+      const std::string classification_str = j["classification"].get<std::string>();
       if (classification_str == "CORRECT") {
         solution.classification = plansys2_solver_msgs::msg::Solver::CORRECT;
+      } else if (classification_str == "MODIFY_PLAN") {
+        solution.classification = plansys2_solver_msgs::msg::Solver::MODIFY_PLAN;
       } else if (classification_str == "MODIFY_DOMAIN") {
         solution.classification = plansys2_solver_msgs::msg::Solver::MODIFY_DOMAIN;
       } else if (classification_str == "UNSOLVABLE") {
         solution.classification = plansys2_solver_msgs::msg::Solver::UNSOLVABLE;
       } else {
-        solution.classification = plansys2_solver_msgs::msg::Solver::MODIFY_PLAN;
+        // Unrecognized classification value — treat as ERROR.
+        return solution;
       }
 
-      if (j.contains("remove_predicates")) {
-        for (const auto & p : j["remove_predicates"]) {
-          solution.remove_predicates.push_back(p.get<std::string>());
+      // Optional arrays: silently skip if absent or wrong type (already have a valid
+      // classification; missing predicates is not itself an ERROR condition).
+      auto appendStrings = [](const nlohmann::json & arr, std::vector<std::string> & out) {
+        if (!arr.is_array()) {
+          return;
         }
+        for (const auto & p : arr) {
+          if (p.is_string()) {
+            out.push_back(p.get<std::string>());
+          }
+        }
+      };
+      if (j.contains("remove_predicates")) {
+        appendStrings(j["remove_predicates"], solution.remove_predicates);
       }
       if (j.contains("add_predicates")) {
-        for (const auto & p : j["add_predicates"]) {
-          solution.add_predicates.push_back(p.get<std::string>());
-        }
+        appendStrings(j["add_predicates"], solution.add_predicates);
       }
       if (j.contains("add_instances")) {
-        for (const auto & p : j["add_instances"]) {
-          solution.add_instances.push_back(p.get<std::string>());
-        }
+        appendStrings(j["add_instances"], solution.add_instances);
       }
       if (j.contains("domain_changes")) {
-        for (const auto & p : j["domain_changes"]) {
-          solution.domain_changes.push_back(p.get<std::string>());
-        }
+        appendStrings(j["domain_changes"], solution.domain_changes);
       }
     } catch (const nlohmann::json::exception &) {
-      solution.classification = plansys2_solver_msgs::msg::Solver::MODIFY_PLAN;
+      // Any json exception during the protected block falls through as ERROR.
+      solution.classification = plansys2_solver_msgs::msg::Solver::ERROR;
     }
 
     return solution;
