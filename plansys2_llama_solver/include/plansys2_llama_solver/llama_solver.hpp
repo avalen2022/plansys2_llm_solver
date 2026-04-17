@@ -72,7 +72,8 @@ public:
 private:
   std::optional<std::filesystem::path> create_folders(const std::string & node_namespace);
 
-  std::string arguments_parameter_name_;
+  std::string launch_extra_args_parameter_name_;
+  std::string prompt_extra_args_parameter_name_;
   std::string output_dir_parameter_name_;
   std::string llm_debug_parameter_name_;
   std::string model_yaml_parameter_name_;

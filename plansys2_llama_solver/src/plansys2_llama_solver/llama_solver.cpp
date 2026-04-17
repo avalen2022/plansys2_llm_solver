@@ -17,6 +17,7 @@
 #include <fstream>
 #include <fcntl.h>
 #include <thread>
+#include <vector>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -38,12 +39,18 @@ void LLAMASolver::configure(
   SolverBase::configure(lc_node, plugin_name);
 
   // Plugin-specific params (namespaced under plugin name).
-  arguments_parameter_name_ = plugin_name + ".arguments";
+  launch_extra_args_parameter_name_ = plugin_name + ".launch_extra_args";
+  prompt_extra_args_parameter_name_ = plugin_name + ".prompt_extra_args";
   output_dir_parameter_name_ = plugin_name + ".output_dir";
   llm_debug_parameter_name_ = plugin_name + ".llm_debug";
 
-  if (!lc_node_->has_parameter(arguments_parameter_name_)) {
-    lc_node_->declare_parameter<std::string>(arguments_parameter_name_, "");
+  if (!lc_node_->has_parameter(launch_extra_args_parameter_name_)) {
+    lc_node_->declare_parameter<std::vector<std::string>>(
+      launch_extra_args_parameter_name_, std::vector<std::string>{});
+  }
+  if (!lc_node_->has_parameter(prompt_extra_args_parameter_name_)) {
+    lc_node_->declare_parameter<std::vector<std::string>>(
+      prompt_extra_args_parameter_name_, std::vector<std::string>{});
   }
   if (!lc_node_->has_parameter(output_dir_parameter_name_)) {
     lc_node_->declare_parameter<std::string>(
@@ -126,10 +133,26 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
 
 
   const auto resolution_file_path = output_dir / std::filesystem::path("solver_resolution.txt");
-  const auto solver_file_path = output_dir / std::filesystem::path("solver");
 
-  const auto args = lc_node_->get_parameter(arguments_parameter_name_).value_to_string();
+  // Read all parameters in the parent, before any fork — rclcpp param access from a
+  // forked child is unsafe (the copy inherits locks that were held by threads that
+  // never run in the child).
+  auto launch_extras =
+    lc_node_->get_parameter(launch_extra_args_parameter_name_).as_string_array();
+  auto prompt_extras =
+    lc_node_->get_parameter(prompt_extra_args_parameter_name_).as_string_array();
   bool llm_debug = lc_node_->get_parameter(llm_debug_parameter_name_).as_bool();
+
+  // Resolve the model YAML path in the parent too (was previously done unsafely
+  // inside the forked child).
+  std::string yaml_path = lc_node_->get_parameter(model_yaml_parameter_name_).as_string();
+  {
+    const char * home_dir = std::getenv("HOME");
+    if (!yaml_path.empty() && yaml_path[0] == '~' && home_dir) {
+      yaml_path.replace(0, 1, std::string(home_dir));
+    }
+  }
+
   auto logger = lc_node_->get_logger();
 
   RCLCPP_INFO(logger,
@@ -161,15 +184,21 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
       }
     }
 
-    const char * home_dir = std::getenv("HOME");
-    std::string yaml_path = lc_node_->get_parameter(model_yaml_parameter_name_).as_string();
-    if (!yaml_path.empty() && yaml_path[0] == '~' && home_dir) {
-      yaml_path.replace(0, 1, std::string(home_dir));
+    // Build argv for `ros2 llama launch <yaml_path> [launch_extras...]`.
+    std::vector<std::string> launch_argv = {"ros2", "llama", "launch", yaml_path};
+    launch_argv.insert(launch_argv.end(), launch_extras.begin(), launch_extras.end());
+
+    std::vector<char *> argv_ptrs;
+    argv_ptrs.reserve(launch_argv.size() + 1);
+    for (auto & s : launch_argv) {
+      argv_ptrs.push_back(s.data());
     }
-    RCLCPP_INFO(logger, "[llama-launch] Starting model: %s", yaml_path.c_str());
-    execlp("ros2", "ros2", "llama", "launch", yaml_path.c_str(), NULL);
-    exit(EXIT_FAILURE);
+    argv_ptrs.push_back(nullptr);
+
+    execvp("ros2", argv_ptrs.data());
+    _exit(EXIT_FAILURE);
   }
+  RCLCPP_INFO(logger, "[llama-launch] Starting model: %s", yaml_path.c_str());
 
   // Drain launch stdout in background thread (real-time logging)
   std::thread launch_drain;
@@ -222,7 +251,20 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
     close(prompt_pipe[0]);
     dup2(prompt_pipe[1], STDOUT_FILENO);
     close(prompt_pipe[1]);
-    execlp("ros2", "ros2", "llama", "prompt", prompt_text.c_str(), "-t", "0.0", NULL);
+
+    // Build argv for `ros2 llama prompt <text> -t 0.0 [prompt_extras...]`.
+    std::vector<std::string> prompt_argv =
+      {"ros2", "llama", "prompt", prompt_text, "-t", "0.0"};
+    prompt_argv.insert(prompt_argv.end(), prompt_extras.begin(), prompt_extras.end());
+
+    std::vector<char *> argv_ptrs;
+    argv_ptrs.reserve(prompt_argv.size() + 1);
+    for (auto & s : prompt_argv) {
+      argv_ptrs.push_back(s.data());
+    }
+    argv_ptrs.push_back(nullptr);
+
+    execvp("ros2", argv_ptrs.data());
     _exit(EXIT_FAILURE);
   }
 
