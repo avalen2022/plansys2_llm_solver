@@ -40,7 +40,7 @@ void LLAMASolver::configure(
   // Plugin-specific params (namespaced under plugin name).
   arguments_parameter_name_ = plugin_name + ".arguments";
   output_dir_parameter_name_ = plugin_name + ".output_dir";
-  llm_debug_parameter_ = plugin_name + ".llm_debug";
+  llm_debug_parameter_name_ = plugin_name + ".llm_debug";
 
   if (!lc_node_->has_parameter(arguments_parameter_name_)) {
     lc_node_->declare_parameter<std::string>(arguments_parameter_name_, "");
@@ -49,8 +49,8 @@ void LLAMASolver::configure(
     lc_node_->declare_parameter<std::string>(
       output_dir_parameter_name_, std::filesystem::temp_directory_path());
   }
-  if (!lc_node_->has_parameter(llm_debug_parameter_)) {
-    lc_node_->declare_parameter<bool>(llm_debug_parameter_, false);
+  if (!lc_node_->has_parameter(llm_debug_parameter_name_)) {
+    lc_node_->declare_parameter<bool>(llm_debug_parameter_name_, false);
   }
 
   model_yaml_parameter_name_ = plugin_name + ".model_yaml";
@@ -129,7 +129,7 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
   const auto solver_file_path = output_dir / std::filesystem::path("solver");
 
   const auto args = lc_node_->get_parameter(arguments_parameter_name_).value_to_string();
-  bool llm_debug = lc_node_->get_parameter(llm_debug_parameter_).as_bool();
+  bool llm_debug = lc_node_->get_parameter(llm_debug_parameter_name_).as_bool();
   auto logger = lc_node_->get_logger();
 
   RCLCPP_INFO(logger,
@@ -145,8 +145,8 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
     pipe(launch_pipe);
   }
 
-  pid_t pid = fork();
-  if (pid == 0) {
+  pid_t server_pid = fork();
+  if (server_pid == 0) {
     if (llm_debug) {
       close(launch_pipe[0]);
       dup2(launch_pipe[1], STDOUT_FILENO);
@@ -252,8 +252,8 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
     elapsed_ms, raw_response.size());
 
   // Shutdown LLM server
-  kill(pid, SIGINT);
-  waitpid(pid, NULL, 0);
+  kill(server_pid, SIGINT);
+  waitpid(server_pid, NULL, 0);
   if (launch_drain.joinable()) {
     launch_drain.join();
   }

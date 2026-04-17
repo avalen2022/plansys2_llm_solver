@@ -30,8 +30,8 @@ class SolverBase
 {
 public:
   using Ptr = std::shared_ptr<plansys2::SolverBase>;
-  SolverBase() {}
-  virtual ~SolverBase() {}
+  SolverBase() = default;
+  virtual ~SolverBase() = default;
 
   virtual void configure(
     rclcpp_lifecycle::LifecycleNode::SharedPtr lc_node, const std::string & plugin_name)
@@ -251,7 +251,7 @@ protected:
   // Lifecycle node pointer.
   rclcpp_lifecycle::LifecycleNode::SharedPtr lc_node_;
   // Flag indicating if cancellation was requested.
-  bool cancel_requested_;
+  bool cancel_requested_ = false;
 
   // Generic solver parameters (read by base configure).
   // "limited" = only FINISH/CANCEL entries; "full" = all entries

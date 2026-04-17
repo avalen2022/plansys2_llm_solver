@@ -178,7 +178,7 @@ std::string get_plugin_type_param(
   return plugin_type;
 }
 
-std::string read_file(const std::string & file_path)
+inline std::string read_file(const std::string & file_path)
 {
   std::ifstream file(file_path);
   if (!file) {

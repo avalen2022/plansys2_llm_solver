@@ -56,9 +56,6 @@ public:
    * @param[in] lc_node Pointer to the lifecycle node.
    * @param[in] plugin_name Name of the plugin to use for parameter namespacing.
    */
-
-  std::optional<std::filesystem::path> create_folders(const std::string & node_namespace);
-
   void configure(
     rclcpp_lifecycle::LifecycleNode::SharedPtr lc_node,
     const std::string & plugin_name) override;
@@ -73,9 +70,11 @@ public:
     const rclcpp::Duration solve_timeout = 15s) override;
 
 private:
+  std::optional<std::filesystem::path> create_folders(const std::string & node_namespace);
+
   std::string arguments_parameter_name_;
   std::string output_dir_parameter_name_;
-  std::string llm_debug_parameter_;
+  std::string llm_debug_parameter_name_;
   std::string model_yaml_parameter_name_;
 
 };

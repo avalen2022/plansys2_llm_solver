@@ -36,7 +36,7 @@ private:
         get_solve_client_;
 
     rclcpp::Node::SharedPtr node_;
-    rclcpp::Duration solver_timeout_ = rclcpp::Duration(300, 0);
+    rclcpp::Duration solve_timeout_ = rclcpp::Duration(300, 0);
 };
 
 }

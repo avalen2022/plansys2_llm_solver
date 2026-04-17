@@ -27,10 +27,10 @@ SolverClient::SolverClient()
   node_->declare_parameter("solver_timeout", timeout);
 
   node_->get_parameter("solver_timeout", timeout);
-  solver_timeout_ = rclcpp::Duration((int32_t)timeout, 0);
+  solve_timeout_ = rclcpp::Duration((int32_t)timeout, 0);
   RCLCPP_INFO(
     node_->get_logger(), "Solver Client created with timeout %g",
-    solver_timeout_.seconds());
+    solve_timeout_.seconds());
 }
 
 std::optional<plansys2_solver_msgs::msg::Solver>
@@ -49,7 +49,7 @@ SolverClient::getReplanificateSolve(
       get_solve_client_->get_service_name() <<
         " service  client: waiting for service to appear...");
   }
-  int32_t timeout = solver_timeout_.seconds();
+  int32_t timeout = solve_timeout_.seconds();
   if (timeout <= 0) {
     RCLCPP_WARN(node_->get_logger(), "Solver timeout was %d, falling back to 150s", timeout);
     timeout = 150;
