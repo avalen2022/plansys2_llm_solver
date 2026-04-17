@@ -13,9 +13,11 @@
 // limitations under the License.
 
 
+#include <cerrno>
 #include <chrono>
 #include <fstream>
 #include <fcntl.h>
+#include <poll.h>
 #include <thread>
 #include <vector>
 #include <sys/wait.h>
@@ -268,14 +270,38 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
     _exit(EXIT_FAILURE);
   }
 
-  // Parent: read pipe, write to resolution file, optionally log in real-time
+  // Parent: poll the pipe so we can observe cancel_requested_ while the LLM
+  // streams. On cancel, SIGTERM the prompt child so the read wakes and we bail.
   close(prompt_pipe[1]);
   std::ofstream resolution_out(resolution_file_path);
   std::string raw_response;
   char buf[512];
-  ssize_t n;
+  bool cancelled = false;
 
-  while ((n = read(prompt_pipe[0], buf, sizeof(buf) - 1)) > 0) {
+  struct pollfd pfd;
+  pfd.fd = prompt_pipe[0];
+  pfd.events = POLLIN;
+
+  while (true) {
+    int poll_ret = poll(&pfd, 1, 100);  // 100 ms wake to check cancel_requested_
+    if (poll_ret < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+    if (poll_ret == 0) {
+      if (cancel_requested_) {
+        cancelled = true;
+        kill(prompt_pid, SIGTERM);
+        break;
+      }
+      continue;
+    }
+    ssize_t n = read(prompt_pipe[0], buf, sizeof(buf) - 1);
+    if (n <= 0) {
+      break;
+    }
     buf[n] = '\0';
     resolution_out.write(buf, n);
     raw_response.append(buf, n);
@@ -290,15 +316,20 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
   auto t_end = std::chrono::steady_clock::now();
   auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
 
-  RCLCPP_INFO(logger, "[llama-solver] LLM inference completed in %ld ms (%zu chars response)",
-    elapsed_ms, raw_response.size());
-
-  // Shutdown LLM server
+  // Shutdown LLM server (runs whether we cancelled or not).
   kill(server_pid, SIGINT);
   waitpid(server_pid, NULL, 0);
   if (launch_drain.joinable()) {
     launch_drain.join();
   }
+
+  if (cancelled) {
+    RCLCPP_WARN(logger, "[llama-solver] Cancelled mid-solve after %ld ms", elapsed_ms);
+    return std::nullopt;
+  }
+
+  RCLCPP_INFO(logger, "[llama-solver] LLM inference completed in %ld ms (%zu chars response)",
+    elapsed_ms, raw_response.size());
 
   auto solution = parseResponse(raw_response);
   solution.time = static_cast<float>(elapsed_ms) / 1000.0f;
