@@ -14,9 +14,9 @@ namespace plansys2
 SolverNode::SolverNode()
 : rclcpp_lifecycle::LifecycleNode("solver"),
   plugin_loader_("plansys2_solver", "plansys2::SolverBase"),
-  default_ids_{},
-  default_types_{},
-  solve_timeout_(120s)
+  default_ids_{"LLAMA"},
+  default_types_{"plansys2/LLAMASolver"},
+  solve_timeout_(150s)
 {
   declare_parameter("solver_plugins", default_ids_);
   double timeout = solve_timeout_.seconds();

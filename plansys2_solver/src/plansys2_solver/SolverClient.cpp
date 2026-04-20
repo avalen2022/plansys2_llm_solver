@@ -23,7 +23,7 @@ SolverClient::SolverClient()
 
   get_solve_client_ = node_->create_client<plansys2_solver_msgs::srv::GetSolve>("solver/get_solve");
 
-  double timeout = 240;
+  double timeout = 150;
   node_->declare_parameter("solver_timeout", timeout);
 
   node_->get_parameter("solver_timeout", timeout);
