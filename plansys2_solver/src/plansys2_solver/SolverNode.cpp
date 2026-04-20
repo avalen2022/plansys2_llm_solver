@@ -1,3 +1,17 @@
+// Copyright 2026 Intelligent Robotics Lab
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include <string>
 #include <memory>
 #include <fstream>
@@ -171,9 +185,7 @@ SolverNode::on_error(const rclcpp_lifecycle::State & state)
 
 void SolverNode::action_hub_callback(plansys2_msgs::msg::ActionExecution::UniquePtr msg)
 {
-  // Deduplicate against the previous message: skip if the same action/type/status/success
-  // and completion has not advanced by at least 0.30 — avoids flooding the log with
-  // near-identical FEEDBACK ticks while still capturing meaningful progress.
+  // Dedup vs previous msg: completion must advance ≥0.30 — suppresses FEEDBACK flood.
   if (previous_action_msg_ != nullptr &&
       msg->action == previous_action_msg_->action &&
       msg->type == previous_action_msg_->type &&
@@ -264,9 +276,7 @@ SolverNode::get_solve_array(const std::string & domain, const std::string & prob
       solver->cancel();
     }
   }
-  // Give cancelled solvers a short window to observe cancel_requested_ and return
-  // before we block on their futures below. 100 ms is a safety margin over the
-  // typical cancel-observation latency in SolverBase::cancel().
+  // 100 ms cushion for LLAMASolver::solve poll loop to observe cancel before we join futures.
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   for (auto & fut : futures) {

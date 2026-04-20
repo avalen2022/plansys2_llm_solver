@@ -1,3 +1,17 @@
+// Copyright 2026 Intelligent Robotics Lab
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #ifndef PLANSYS2_SOLVER__SOLVERBASE_HPP_
 #define PLANSYS2_SOLVER__SOLVERBASE_HPP_
 
@@ -54,8 +68,7 @@ public:
   virtual void cancel() {cancel_requested_ = true;}
 
 protected:
-  // Map an ActionExecution::type value to its printable name. Anything outside the known
-  // enum range is reported as UNKNOWN instead of indexing a lookup table blindly.
+  // UNKNOWN for out-of-range types — no array indexing.
   static inline const char * actionTypeName(int16_t type)
   {
     using plansys2_msgs::msg::ActionExecution;
@@ -71,11 +84,8 @@ protected:
     }
   }
 
-  // Parse the action-hub log (written by SolverNode::action_hub_callback, which uses a
-  // "-----" separator and "Field: value" lines) and build a compact text summary the LLM
-  // can consume. When `limited` is true (default) only FINISH/CANCEL entries are kept —
-  // enough to know which action closed and how — dropping the chatty REQUEST/RESPONSE/
-  // CONFIRM/REJECT/FEEDBACK traffic that bloats the prompt.
+  // Parse action_hub entries separated by a row of dashes; limited=true keeps
+  // only FINISH/CANCEL entries, dropping the chatty intermediate traffic.
   static inline std::string summarizeActionLog(const std::string & raw_log, bool limited = true)
   {
     using plansys2_msgs::msg::ActionExecution;
@@ -152,7 +162,6 @@ protected:
     return summary;
   }
 
-  // Build the standard prompt for the LLM with domain, problem, action log, and observation.
   static inline std::string makePrompt(
     const std::string & domain,
     const std::string & problem,
@@ -182,25 +191,19 @@ protected:
       "}";
   }
 
-  // Parse raw LLM response into a populated Solver message.
-  // Extracts the JSON object from wrapping text, validates the required shape, and
-  // fills the classification + structured arrays. Any failure (empty response, no JSON
-  // object found, parse error, not-an-object, missing classification field, unknown
-  // classification value, type mismatches) yields classification = ERROR so the caller
-  // can tell "LLM didn't answer" apart from "LLM asked for a replan".
+  // Any failure yields classification=ERROR so callers can distinguish
+  // "LLM didn't answer" from "LLM wants a replan".
   static inline plansys2_solver_msgs::msg::Solver parseResponse(const std::string & raw_response)
   {
     plansys2_solver_msgs::msg::Solver solution;
     solution.resolution = raw_response;
-    // Default to ERROR; only overwrite once all shape checks pass.
     solution.classification = plansys2_solver_msgs::msg::Solver::ERROR;
 
     if (raw_response.empty()) {
       return solution;
     }
 
-    // Extract the JSON object substring. LLMs occasionally wrap JSON in commentary;
-    // we take the outermost {...} and discard anything around it.
+    // Outermost {...}; LLMs sometimes wrap JSON in commentary.
     const auto json_start = raw_response.find('{');
     const auto json_end = raw_response.rfind('}');
     if (json_start == std::string::npos || json_end == std::string::npos ||
@@ -228,12 +231,10 @@ protected:
       } else if (classification_str == "UNSOLVABLE") {
         solution.classification = plansys2_solver_msgs::msg::Solver::UNSOLVABLE;
       } else {
-        // Unrecognized classification value — treat as ERROR.
         return solution;
       }
 
-      // Optional arrays: silently skip if absent or wrong type (already have a valid
-      // classification; missing predicates is not itself an ERROR condition).
+      // Optional arrays: absent or wrong type is not ERROR; classification already valid.
       auto appendStrings = [](const nlohmann::json & arr, std::vector<std::string> & out) {
         if (!arr.is_array()) {
           return;
@@ -257,23 +258,18 @@ protected:
         appendStrings(j["domain_changes"], solution.domain_changes);
       }
     } catch (const nlohmann::json::exception &) {
-      // Any json exception during the protected block falls through as ERROR.
       solution.classification = plansys2_solver_msgs::msg::Solver::ERROR;
     }
 
     return solution;
   }
 
-  // Lifecycle node pointer.
   rclcpp_lifecycle::LifecycleNode::SharedPtr lc_node_;
-  // Flag indicating if cancellation was requested.
   bool cancel_requested_ = false;
 
-  // Generic solver parameters (read by base configure).
-  // "limited" = only FINISH/CANCEL entries; "full" = all entries
-  std::string summarize_mode_{"limited"};
-  // Log the full prompt and response
-  bool prompt_debug_{false};
+  // "limited" = only FINISH/CANCEL entries; "full" = all entries.
+  std::string summarize_mode_ = "limited";
+  bool prompt_debug_ = false;
 };
 
 }  // namespace plansys2
