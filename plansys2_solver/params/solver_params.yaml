@@ -20,6 +20,7 @@ solver:
     LLAMA:
       plugin: "plansys2/LLAMASolver"
       llm_debug: true
+      pre_launch: true  # false = re-launch LLM per solve (slower, frees RAM between solves)
       model_yaml: "~/TFG/src/llm/llama_ros/llama_bringup/models/Phi-4.yaml"
 executor:
   ros__parameters:

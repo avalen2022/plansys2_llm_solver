@@ -33,18 +33,22 @@ LLAMASolver::LLAMASolver()
 {
 }
 
+LLAMASolver::~LLAMASolver()
+{
+  shutdown_llm_server();
+}
+
 void LLAMASolver::configure(
   rclcpp_lifecycle::LifecycleNode::SharedPtr lc_node,
   const std::string & plugin_name)
 {
-  // Generic params (summarize_mode, prompt_debug) read by base class.
   SolverBase::configure(lc_node, plugin_name);
 
-  // Plugin-specific params (namespaced under plugin name).
   launch_extra_args_parameter_name_ = plugin_name + ".launch_extra_args";
   prompt_extra_args_parameter_name_ = plugin_name + ".prompt_extra_args";
   output_dir_parameter_name_ = plugin_name + ".output_dir";
   llm_debug_parameter_name_ = plugin_name + ".llm_debug";
+  pre_launch_parameter_name_ = plugin_name + ".pre_launch";
 
   if (!lc_node_->has_parameter(launch_extra_args_parameter_name_)) {
     lc_node_->declare_parameter<std::vector<std::string>>(
@@ -61,11 +65,31 @@ void LLAMASolver::configure(
   if (!lc_node_->has_parameter(llm_debug_parameter_name_)) {
     lc_node_->declare_parameter<bool>(llm_debug_parameter_name_, false);
   }
+  if (!lc_node_->has_parameter(pre_launch_parameter_name_)) {
+    lc_node_->declare_parameter<bool>(pre_launch_parameter_name_, true);
+  }
 
   model_yaml_parameter_name_ = plugin_name + ".model_yaml";
   if (!lc_node_->has_parameter(model_yaml_parameter_name_)) {
     lc_node_->declare_parameter<std::string>(
       model_yaml_parameter_name_, "~/TFG/src/llm/llama_ros/llama_bringup/models/Qwen2.5-3B.yaml");
+  }
+
+  llm_debug_ = lc_node_->get_parameter(llm_debug_parameter_name_).as_bool();
+  pre_launch_ = lc_node_->get_parameter(pre_launch_parameter_name_).as_bool();
+  launch_extras_ =
+    lc_node_->get_parameter(launch_extra_args_parameter_name_).as_string_array();
+
+  yaml_path_ = lc_node_->get_parameter(model_yaml_parameter_name_).as_string();
+  {
+    const char * home_dir = std::getenv("HOME");
+    if (!yaml_path_.empty() && yaml_path_[0] == '~' && home_dir) {
+      yaml_path_.replace(0, 1, std::string(home_dir));
+    }
+  }
+
+  if (pre_launch_) {
+    launch_llm_server();
   }
 }
 
@@ -112,6 +136,8 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
 {
   cancel_requested_ = false;
 
+  const auto t_solve_start = std::chrono::steady_clock::now();
+
   const auto output_dir_maybe = create_folders(node_namespace);
   if (!output_dir_maybe) {
     return {};
@@ -136,105 +162,33 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
 
   const auto resolution_file_path = output_dir / std::filesystem::path("solver_resolution.txt");
 
-  // Read all parameters in the parent, before any fork — rclcpp param access from a
-  // forked child is unsafe (the copy inherits locks that were held by threads that
-  // never run in the child).
-  auto launch_extras =
-    lc_node_->get_parameter(launch_extra_args_parameter_name_).as_string_array();
   auto prompt_extras =
     lc_node_->get_parameter(prompt_extra_args_parameter_name_).as_string_array();
-  bool llm_debug = lc_node_->get_parameter(llm_debug_parameter_name_).as_bool();
-
-  // Resolve the model YAML path in the parent too (was previously done unsafely
-  // inside the forked child).
-  std::string yaml_path = lc_node_->get_parameter(model_yaml_parameter_name_).as_string();
-  {
-    const char * home_dir = std::getenv("HOME");
-    if (!yaml_path.empty() && yaml_path[0] == '~' && home_dir) {
-      yaml_path.replace(0, 1, std::string(home_dir));
-    }
-  }
 
   auto logger = lc_node_->get_logger();
 
   RCLCPP_INFO(logger,
-    "[llama-solver] Starting solve (timeout=%.0fs, summarize=%s, llm_debug=%s, prompt_debug=%s)",
+    "[llama-solver] Starting solve (timeout=%.0fs, summarize=%s, llm_debug=%s, "
+    "prompt_debug=%s, pre_launch=%s)",
     solve_timeout.seconds(),
     summarize_mode_.c_str(),
-    llm_debug ? "true" : "false",
-    prompt_debug_ ? "true" : "false");
+    llm_debug_ ? "true" : "false",
+    prompt_debug_ ? "true" : "false",
+    pre_launch_ ? "true" : "false");
 
-  // --- Fork: launch LLM server ---
-  int launch_pipe[2] = {-1, -1};
-  if (llm_debug) {
-    pipe(launch_pipe);
+  // Fall back to on-the-fly launch if pre_launch_ said so but server is gone.
+  if (!pre_launch_) {
+    launch_llm_server();
+  } else if (launch_pid_ == -1) {
+    RCLCPP_WARN(logger,
+      "[llama-solver] pre_launch=true but server is not running; "
+      "falling back to on-the-fly launch");
+    launch_llm_server();
   }
 
-  pid_t server_pid = fork();
-  if (server_pid == 0) {
-    if (llm_debug) {
-      close(launch_pipe[0]);
-      dup2(launch_pipe[1], STDOUT_FILENO);
-      dup2(launch_pipe[1], STDERR_FILENO);
-      close(launch_pipe[1]);
-    } else {
-      int fd = open("/dev/null", O_WRONLY);
-      if (fd != -1) {
-        dup2(fd, STDOUT_FILENO);
-        dup2(fd, STDERR_FILENO);
-        close(fd);
-      }
-    }
-
-    // Build argv for `ros2 llama launch <yaml_path> [launch_extras...]`.
-    std::vector<std::string> launch_argv = {"ros2", "llama", "launch", yaml_path};
-    launch_argv.insert(launch_argv.end(), launch_extras.begin(), launch_extras.end());
-
-    std::vector<char *> argv_ptrs;
-    argv_ptrs.reserve(launch_argv.size() + 1);
-    for (auto & s : launch_argv) {
-      argv_ptrs.push_back(s.data());
-    }
-    argv_ptrs.push_back(nullptr);
-
-    execvp("ros2", argv_ptrs.data());
-    _exit(EXIT_FAILURE);
-  }
-  RCLCPP_INFO(logger, "[llama-launch] Starting model: %s", yaml_path.c_str());
-
-  // Drain launch stdout in background thread (real-time logging)
-  std::thread launch_drain;
-  if (llm_debug) {
-    close(launch_pipe[1]);
-    launch_drain = std::thread([fd = launch_pipe[0], logger]() {
-      char buf[512];
-      std::string line_buf;
-      ssize_t n;
-      while ((n = read(fd, buf, sizeof(buf) - 1)) > 0) {
-        buf[n] = '\0';
-        line_buf += buf;
-        // Log complete lines as they arrive
-        size_t pos;
-        while ((pos = line_buf.find('\n')) != std::string::npos) {
-          std::string line = line_buf.substr(0, pos);
-          if (!line.empty()) {
-            RCLCPP_INFO(logger, "[llama-launch] %s", line.c_str());
-          }
-          line_buf.erase(0, pos + 1);
-        }
-      }
-      if (!line_buf.empty()) {
-        RCLCPP_INFO(logger, "[llama-launch] %s", line_buf.c_str());
-      }
-      close(fd);
-    });
-  }
-
-  // Summarize the raw action hub into a compact log for the LLM.
   bool limited = (summarize_mode_ != "full");
   std::string action_summary = summarizeActionLog(action_file, limited);
 
-  // Build prompt
   std::string prompt_text = makePrompt(domain, problem, action_summary, observation);
 
   if (prompt_debug_) {
@@ -242,11 +196,8 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
       prompt_text.size(), prompt_text.c_str());
   }
 
-  // --- Fork: send prompt via pipe (tee to file + optional logging) ---
   int prompt_pipe[2];
   pipe(prompt_pipe);
-
-  auto t_start = std::chrono::steady_clock::now();
 
   pid_t prompt_pid = fork();
   if (prompt_pid == 0) {
@@ -254,7 +205,6 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
     dup2(prompt_pipe[1], STDOUT_FILENO);
     close(prompt_pipe[1]);
 
-    // Build argv for `ros2 llama prompt <text> -t 0.0 [prompt_extras...]`.
     std::vector<std::string> prompt_argv =
       {"ros2", "llama", "prompt", prompt_text, "-t", "0.0"};
     prompt_argv.insert(prompt_argv.end(), prompt_extras.begin(), prompt_extras.end());
@@ -313,22 +263,21 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
   resolution_out.close();
   waitpid(prompt_pid, NULL, 0);
 
-  auto t_end = std::chrono::steady_clock::now();
-  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
-
-  // Shutdown LLM server (runs whether we cancelled or not).
-  kill(server_pid, SIGINT);
-  waitpid(server_pid, NULL, 0);
-  if (launch_drain.joinable()) {
-    launch_drain.join();
+  // Only tear down the LLM server in per-solve mode. In pre_launch mode the
+  // server is kept alive and torn down by the destructor.
+  if (!pre_launch_) {
+    shutdown_llm_server();
   }
+
+  const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now() - t_solve_start).count();
 
   if (cancelled) {
     RCLCPP_WARN(logger, "[llama-solver] Cancelled mid-solve after %ld ms", elapsed_ms);
     return std::nullopt;
   }
 
-  RCLCPP_INFO(logger, "[llama-solver] LLM inference completed in %ld ms (%zu chars response)",
+  RCLCPP_INFO(logger, "[llama-solver] solve() completed in %ld ms (%zu chars response)",
     elapsed_ms, raw_response.size());
 
   auto solution = parseResponse(raw_response);
@@ -339,6 +288,98 @@ std::optional<plansys2_solver_msgs::msg::Solver> LLAMASolver::solve(
 void LLAMASolver::initialize(const std::string & node_name)
 {
   std::cout << "Initializing solver with node: " << node_name << std::endl;
+}
+
+void LLAMASolver::launch_llm_server()
+{
+  if (launch_pid_ != -1) {
+    return;
+  }
+
+  auto logger = lc_node_->get_logger();
+
+  int launch_pipe[2] = {-1, -1};
+  if (llm_debug_) {
+    pipe(launch_pipe);
+  }
+
+  pid_t pid = fork();
+  if (pid == 0) {
+    if (llm_debug_) {
+      close(launch_pipe[0]);
+      dup2(launch_pipe[1], STDOUT_FILENO);
+      dup2(launch_pipe[1], STDERR_FILENO);
+      close(launch_pipe[1]);
+    } else {
+      int fd = open("/dev/null", O_WRONLY);
+      if (fd != -1) {
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+        close(fd);
+      }
+    }
+
+    std::vector<std::string> launch_argv = {"ros2", "llama", "launch", yaml_path_};
+    launch_argv.insert(launch_argv.end(), launch_extras_.begin(), launch_extras_.end());
+
+    std::vector<char *> argv_ptrs;
+    argv_ptrs.reserve(launch_argv.size() + 1);
+    for (auto & s : launch_argv) {
+      argv_ptrs.push_back(s.data());
+    }
+    argv_ptrs.push_back(nullptr);
+
+    execvp("ros2", argv_ptrs.data());
+    _exit(EXIT_FAILURE);
+  }
+
+  launch_pid_ = pid;
+  RCLCPP_INFO(logger, "[llama-launch] Starting model: %s [pid=%d | pre_launch=%s]",
+    yaml_path_.c_str(), static_cast<int>(launch_pid_),
+    pre_launch_ ? "true" : "false");
+
+  if (llm_debug_) {
+    close(launch_pipe[1]);
+    launch_drain_ = std::thread([fd = launch_pipe[0], logger]() {
+      char buf[512];
+      std::string line_buf;
+      ssize_t n;
+      while ((n = read(fd, buf, sizeof(buf) - 1)) > 0) {
+        buf[n] = '\0';
+        line_buf += buf;
+        size_t pos;
+        while ((pos = line_buf.find('\n')) != std::string::npos) {
+          std::string line = line_buf.substr(0, pos);
+          if (!line.empty()) {
+            RCLCPP_INFO(logger, "[llama-launch] %s", line.c_str());
+          }
+          line_buf.erase(0, pos + 1);
+        }
+      }
+      if (!line_buf.empty()) {
+        RCLCPP_INFO(logger, "[llama-launch] %s", line_buf.c_str());
+      }
+      close(fd);
+    });
+  }
+}
+
+void LLAMASolver::shutdown_llm_server()
+{
+  if (launch_pid_ == -1) {
+    return;
+  }
+
+  // Avoid touching lc_node_ here: the destructor path can run while the owning
+  // lifecycle node is already being torn down. The solve() path prints its own
+  // shutdown context if needed.
+  kill(launch_pid_, SIGINT);
+  waitpid(launch_pid_, NULL, 0);
+  launch_pid_ = -1;
+
+  if (launch_drain_.joinable()) {
+    launch_drain_.join();
+  }
 }
 }  // namespace plansys2
 
